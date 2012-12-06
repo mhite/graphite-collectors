@@ -397,7 +397,6 @@ def main():
                  default=False, help="Skip metric upload step")
     p.add_option('-u', '--user', help='Username and password for iControl authentication', dest='user')
     p.add_option('-p', '--port', help="Carbon port [%default]", type="int", dest='carbon_port', default=2004)
-    p.add_option('-d', '--delay', help='Delay in seconds between metric collections', type="int", dest="delay", default=300)
     p.add_option('-c', '--chunk-size', help='Carbon chunk size [%default]', type="int", dest='chunk_size', default=500)
     p.add_option('--prefix', help="Metric name prefix [bigip.ltm_host]", dest="prefix")
 
@@ -418,8 +417,6 @@ def main():
                         datefmt='%Y-%m-%d %H:%M:%S')
     logging.getLogger('suds').setLevel(logging.CRITICAL)
 
-    delay = options.delay
-    logging.debug("debug = %s" % delay)
     skip_upload = options.skip_upload
     logging.debug("skip_upload = %s" % skip_upload)
     chunk_size = options.chunk_size
@@ -457,16 +454,12 @@ def main():
     carbon_host = arguments[1]
     logging.debug("carbon_host = %s" % carbon_host)
 
-    while True:
-        metric_list = gather_f5_metrics(ltm_host, user, password, prefix)
-        if not skip_upload:
-            logging.info("Uploading metrics...")
-            send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
-        else:
-            logging.info("Skipping upload step.")
-        # Rinse, repeat
-        logging.info("Sleeping %d..." % delay)
-        time.sleep(delay)
+    metric_list = gather_f5_metrics(ltm_host, user, password, prefix)
+    if not skip_upload:
+        logging.info("Uploading metrics...")
+        send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
+    else:
+        logging.info("Skipping upload step.")
 
 
 if __name__ == '__main__':
