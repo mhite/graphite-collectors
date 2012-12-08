@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 12/5/2012
+# 12/7/2012
 
 import bigsuds
 import time
@@ -14,7 +14,7 @@ import logging
 import getpass
 from pprint import pformat
 
-VERSION="1.0"
+VERSION="1.1"
 
 # list of pool statistics to monitor
 
@@ -63,9 +63,13 @@ HOST_STATISTICS = ['memory_total_bytes',
 
 
 def convert_to_64_bit(high, low):
-    """ Converts two 32 bit integers to a 64-bit integer.
+    """ Converts two 32 bit signed integers to a 64-bit unsigned integer.
     """
-    return (high << 32) + low
+    if high < 0:
+        high = high + (1 << 32)
+    if low < 0:
+        low = low + (1 << 32)
+    return long((high << 32) | low)
 
 
 def chunks(l, n):
@@ -92,6 +96,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # IP
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global IP statistics...")
     ip_stats = b.System.Statistics.get_ip_statistics()
     logging.debug("ip_stats =\n%s" % pformat(ip_stats))
@@ -108,6 +114,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # IPv6
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global IPv6 statistics...")
     ipv6_stats = b.System.Statistics.get_ipv6_statistics()
     logging.debug("ipv6_stats =\n%s" % pformat(ipv6_stats))
@@ -124,6 +132,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # ICMP
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global ICMP statistics...")
     icmp_stats = b.System.Statistics.get_icmp_statistics()
     logging.debug("icmp_stats =\n%s" % pformat(icmp_stats))
@@ -140,6 +150,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # ICMPv6
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global ICMPv6 statistics...")
     icmpv6_stats = b.System.Statistics.get_icmpv6_statistics()
     logging.debug("icmpv6_stats =\n%s" % pformat(icmpv6_stats))
@@ -156,6 +168,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # TCP
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving TCP statistics...")
     tcp_stats = b.System.Statistics.get_tcp_statistics()
     logging.debug("tcp_stats =\n%s" % pformat(tcp_stats))
@@ -172,6 +186,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # All TMM
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving all TMM statistics...")
     all_tmm_stats = b.System.Statistics.get_all_tmm_statistics()
     logging.debug("all_tmm_stats =\n%s" % pformat(all_tmm_stats))
@@ -192,6 +208,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # Global TMM
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global TMM statistics...")
     global_tmm_stats = b.System.Statistics.get_global_tmm_statistics()
     logging.debug("global_tmm_stats =\n%s" % pformat(global_tmm_stats))
@@ -208,6 +226,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # Client SSL
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving client SSL statistics...")
     client_ssl_stats = b.System.Statistics.get_client_ssl_statistics()
     logging.debug("client_ssl_stats =\n%s" % pformat(client_ssl_stats))
@@ -228,6 +248,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving list of interfaces...")
     interfaces = b.Networking.Interfaces.get_list()
     logging.debug("interfaces =\n%s" % pformat(interfaces))
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving interface statistics...")
     int_stats = b.Networking.Interfaces.get_statistics(interfaces)
     logging.debug("int_stats =\n%s" % pformat(int_stats))
@@ -250,6 +272,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving list of trunks...")
     trunks = b.Networking.Trunk.get_list()
     logging.debug("trunks =\n%s" % pformat(trunks))
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving trunk statistics...")
     trunk_stats = b.Networking.Trunk.get_statistics(trunks)
     logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
@@ -268,6 +292,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # CPU
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving CPU statistics...")
     cpu_stats = b.System.SystemInfo.get_all_cpu_usage_extended_information()
     logging.debug("cpu_stats =\n%s" % pformat(cpu_stats))
@@ -287,6 +313,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # Host
 
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving host statistics...")
     host_stats = b.System.Statistics.get_all_host_statistics()
     logging.debug("host_stats =\n%s" % pformat(host_stats))
@@ -314,6 +342,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving virtual server list...")
     virt_list = b.LocalLB.VirtualServer.get_list()
     logging.debug("virt_list =\n%s" % pformat(virt_list))
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving statistics for all virtual servers...")
     virt_stats = b.LocalLB.VirtualServer.get_statistics(virtual_servers=virt_list)
     logging.debug("virt_stats =\n%s" % pformat(virt_stats))
@@ -336,6 +366,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving pool list...")
     pool_list = b.LocalLB.Pool.get_list()
     logging.debug("pool_list =\n%s" % pformat(pool_list))
+    now = int(time.time())
+    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving statistics for all pools...")
     pool_stats = b.LocalLB.Pool.get_statistics(pool_names=pool_list)
     logging.debug("pool_stats =\n%s" % pformat(pool_stats))
