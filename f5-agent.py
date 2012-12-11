@@ -15,7 +15,7 @@ import getpass
 from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
 
-VERSION="1.2"
+VERSION="1.22"
 
 # list of pool statistics to monitor
 
@@ -55,7 +55,8 @@ INTERFACES = ['3-1', '3-2', 'mgmt']
 CLIENT_SSL_STATISTICS = ['ssl_five_min_avg_tot_conns',
                          'ssl_five_sec_avg_tot_conns',
                          'ssl_one_min_avg_tot_conns',
-                         'ssl_common_total_native_connections']
+                         'ssl_common_total_native_connections',
+                         'ssl_common_total_compatible_mode_connections']
 
 # Host
 
@@ -432,6 +433,60 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
                 metric = (stat_path, (now, stat_val))
                 logging.debug("metric = %s" % str(metric))
                 metric_list.append(metric)
+
+    # SNAT Pool
+
+    logging.info("Retrieving SNAT Pool statistics...")
+    snatpool_stats = b.LocalLB.SNATPool.get_all_statistics()
+    logging.debug("snatpool_stats = %s" % pformat(snatpool_stats))
+    statistics = snatpool_stats['statistics']
+    ts = snatpool_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
+    for x in statistics:
+        snat_pool = x['snat_pool'].replace(".", '-')
+        for y in x['statistics']:
+            stat_name = y['type'].split("STATISTIC_")[-1].lower()
+            high = y['value']['high']
+            low = y['value']['low']
+            stat_val = convert_to_64_bit(high, low)
+            stat_path = "%s.snat_pool.%s.%s" % (prefix, snat_pool, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
+
+    # SNAT Translations
+
+    logging.info("Retrieving SNAT translation statistics...")
+    snattrans_stats = b.LocalLB.SNATTranslationAddressV2.get_all_statistics()
+    logging.debug("snattrans_stats = %s" % pformat(snattrans_stats))
+    statistics = snattrans_stats['statistics']
+    ts = snattrans_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
+    for x in statistics:
+        trans_addr = x['translation_address'].replace(".", '-')
+        for y in x['statistics']:
+            stat_name = y['type'].split("STATISTIC_")[-1].lower()
+            high = y['value']['high']
+            low = y['value']['low']
+            stat_val = convert_to_64_bit(high, low)
+            stat_path = "%s.snat_pool.%s.%s" % (prefix, trans_addr, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
 
     # Virtual server
 
