@@ -15,7 +15,7 @@ import getpass
 from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
 
-VERSION="1.22"
+VERSION="1.23"
 
 # list of pool statistics to monitor
 
@@ -490,11 +490,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
 
     # Virtual server
 
-    logging.info("Retrieving virtual server list...")
-    virt_list = b.LocalLB.VirtualServer.get_list()
-    logging.debug("virt_list =\n%s" % pformat(virt_list))
     logging.info("Retrieving statistics for all virtual servers...")
-    virt_stats = b.LocalLB.VirtualServer.get_statistics(virtual_servers=virt_list)
+    virt_stats = b.LocalLB.VirtualServer.get_all_statistics()
     logging.debug("virt_stats =\n%s" % pformat(virt_stats))
     statistics = virt_stats['statistics']
     ts = virt_stats['time_stamp']
@@ -521,11 +518,8 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
 
     # Pool
 
-    logging.info("Retrieving pool list...")
-    pool_list = b.LocalLB.Pool.get_list()
-    logging.debug("pool_list =\n%s" % pformat(pool_list))
     logging.info("Retrieving statistics for all pools...")
-    pool_stats = b.LocalLB.Pool.get_statistics(pool_names=pool_list)
+    pool_stats = b.LocalLB.Pool.get_all_statistics()
     logging.debug("pool_stats =\n%s" % pformat(pool_stats))
     statistics = pool_stats['statistics']
     ts = pool_stats['time_stamp']
@@ -550,13 +544,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
                 logging.debug("metric = %s" % str(metric))
                 metric_list.append(metric)
     # Reuse previous timestamp (a.k.a. fake it!)
-    logging.info("Retrieving active member count for all pools...")
-    active_member_count = b.LocalLB.Pool.get_active_member_count(pool_names=pool_list)
-    for pool_name, stat_val in zip(pool_list, active_member_count):
-        stat_path = "%s.pool.%s.active_member_count" % (prefix, pool_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
+    logging.info("Retrieving pool list...")
+    pool_list = b.LocalLB.Pool.get_list()
+    logging.debug("pool_list =\n%s" % pformat(pool_list))
+    if pool_list:
+        logging.info("Retrieving active member count for all pools...")
+        active_member_count = b.LocalLB.Pool.get_active_member_count(pool_names=pool_list)
+        for pool_name, stat_val in zip(pool_list, active_member_count):
+            stat_path = "%s.pool.%s.active_member_count" % (prefix, pool_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
+    else:
+        logging.info("Pool list is empty, skipping active member count retrieval.")
 
     logging.info("There are %d metrics to load." % len(metric_list))
     return(metric_list)
