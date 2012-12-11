@@ -1,8 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 12/7/2012
+# 12/10/2012
 
 import bigsuds
 import time
@@ -12,9 +12,10 @@ import struct
 import optparse
 import logging
 import getpass
+from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
 
-VERSION="1.1"
+VERSION="1.2"
 
 # list of pool statistics to monitor
 
@@ -62,6 +63,23 @@ HOST_STATISTICS = ['memory_total_bytes',
                    'memory_used_bytes']
 
 
+class TZFixedOffset(tzinfo):
+    """Fixed offset in minutes east from UTC."""
+
+    def __init__(self, offset, name):
+        self.__offset = timedelta(minutes = offset)
+        self.__name = name
+
+    def utcoffset(self, dt):
+        return self.__offset
+
+    def tzname(self, dt):
+        return self.__name
+
+    def dst(self, dt):
+        return timedelta(0)
+
+
 def convert_to_64_bit(high, low):
     """ Converts two 32 bit signed integers to a 64-bit unsigned integer.
     """
@@ -79,16 +97,37 @@ def chunks(l, n):
         yield l[i:i+n]
 
 
-def gather_f5_metrics(ltm_host, user, password, prefix):
-    """ Connects an F5 via iControl and pulls statistics.
+def timestamp_local():
+    """Return local epoch timestamp.
     """
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
+    epoch = int(time.time())
+    logging.debug("epoch = %s" % epoch)
+    return(epoch)
+
+
+def convert_to_epoch(year, month, day, hour, minute, second, tz):
+    """Converts date/time components to an epoch timestamp.
+    """
+    dt = datetime(year, month, day, hour, minute, second, tzinfo=tz)
+    logging.debug("dt = %s" % dt)
+    epoch = int((dt - datetime(1970, 1, 1, tzinfo=TZFixedOffset(0, "UTC"))).total_seconds())
+    logging.debug("epoch = %s" % epoch)
+    return(epoch)
+
+
+def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
+    """ Connects to an F5 via iControl and pulls statistics.
+    """
     metric_list = []
-    logging.info("Connecting to BIGIP and pulling statistics...")
+    logging.info("Connecting to BIG-IP and pulling statistics...")
     b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
     logging.info("Requesting session...")
     b = b.with_session_id()
+    logging.info("Retrieving time zone information...")
+    time_zone = b.System.SystemInfo.get_time_zone()
+    logging.debug("time_zone = %s" % pformat(time_zone))
+    tz = TZFixedOffset(offset=(time_zone['gmt_offset'] * 60), name=time_zone['time_zone'])
+    logging.info("Remote time zone is \"%s\"." % time_zone['time_zone'])
     logging.info("Setting recursive query state to enabled...")
     b.System.Session.set_recursive_query_state(state='STATE_ENABLED')
     logging.info("Switching active folder to root...")
@@ -96,12 +135,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # IP
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global IP statistics...")
     ip_stats = b.System.Statistics.get_ip_statistics()
     logging.debug("ip_stats =\n%s" % pformat(ip_stats))
     statistics = ip_stats['statistics']
+    ts = ip_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -114,12 +160,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # IPv6
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global IPv6 statistics...")
     ipv6_stats = b.System.Statistics.get_ipv6_statistics()
     logging.debug("ipv6_stats =\n%s" % pformat(ipv6_stats))
     statistics = ipv6_stats['statistics']
+    ts = ipv6_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -132,12 +185,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # ICMP
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global ICMP statistics...")
     icmp_stats = b.System.Statistics.get_icmp_statistics()
     logging.debug("icmp_stats =\n%s" % pformat(icmp_stats))
     statistics = icmp_stats['statistics']
+    ts = icmp_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -150,12 +210,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # ICMPv6
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global ICMPv6 statistics...")
     icmpv6_stats = b.System.Statistics.get_icmpv6_statistics()
     logging.debug("icmpv6_stats =\n%s" % pformat(icmpv6_stats))
     statistics = icmpv6_stats['statistics']
+    ts = icmpv6_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -168,12 +235,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # TCP
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving TCP statistics...")
     tcp_stats = b.System.Statistics.get_tcp_statistics()
     logging.debug("tcp_stats =\n%s" % pformat(tcp_stats))
     statistics = tcp_stats['statistics']
+    ts = tcp_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -184,36 +258,21 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
         logging.debug("metric = %s" % str(metric))
         metric_list.append(metric)
 
-    # All TMM
-
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
-    logging.info("Retrieving all TMM statistics...")
-    all_tmm_stats = b.System.Statistics.get_all_tmm_statistics()
-    logging.debug("all_tmm_stats =\n%s" % pformat(all_tmm_stats))
-    statistics = all_tmm_stats['statistics']
-    for x in statistics:
-        tmm_name = x['tmm_id']
-        tmm_host = tmm_name.split(".")[0]
-        tmm_cpu = tmm_name.split(".")[1]
-        for y in x['statistics']:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.tmm.%s.cpu%s.%s" % (prefix, tmm_host, tmm_cpu, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-
     # Global TMM
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving global TMM statistics...")
     global_tmm_stats = b.System.Statistics.get_global_tmm_statistics()
     logging.debug("global_tmm_stats =\n%s" % pformat(global_tmm_stats))
     statistics = global_tmm_stats['statistics']
+    ts = global_tmm_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         high = y['value']['high']
@@ -226,12 +285,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # Client SSL
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving client SSL statistics...")
     client_ssl_stats = b.System.Statistics.get_client_ssl_statistics()
     logging.debug("client_ssl_stats =\n%s" % pformat(client_ssl_stats))
     statistics = client_ssl_stats['statistics']
+    ts = client_ssl_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for y in statistics:
         stat_name = y['type'].split("STATISTIC_")[-1].lower()
         if stat_name in CLIENT_SSL_STATISTICS:
@@ -248,12 +314,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving list of interfaces...")
     interfaces = b.Networking.Interfaces.get_list()
     logging.debug("interfaces =\n%s" % pformat(interfaces))
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving interface statistics...")
     int_stats = b.Networking.Interfaces.get_statistics(interfaces)
     logging.debug("int_stats =\n%s" % pformat(int_stats))
     statistics = int_stats['statistics']
+    ts = int_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         int_name = x['interface_name'].replace('.', '-')
         if int_name in INTERFACES:
@@ -272,12 +345,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving list of trunks...")
     trunks = b.Networking.Trunk.get_list()
     logging.debug("trunks =\n%s" % pformat(trunks))
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving trunk statistics...")
     trunk_stats = b.Networking.Trunk.get_statistics(trunks)
     logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
     statistics = trunk_stats['statistics']
+    ts = trunk_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         trunk_name = x['trunk_name'].replace('.', '-')
         for y in x['statistics']:
@@ -292,12 +372,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # CPU
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving CPU statistics...")
     cpu_stats = b.System.SystemInfo.get_all_cpu_usage_extended_information()
     logging.debug("cpu_stats =\n%s" % pformat(cpu_stats))
     statistics = cpu_stats['hosts']
+    ts = cpu_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         host_id = x['host_id'].replace('.', '-')
         for cpu_num, cpu_stat in enumerate(x['statistics']):
@@ -313,12 +400,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
 
     # Host
 
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving host statistics...")
     host_stats = b.System.Statistics.get_all_host_statistics()
     logging.debug("host_stats =\n%s" % pformat(host_stats))
     statistics = host_stats['statistics']
+    ts = host_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         host_id = x['host_id'].replace('.', '-')
         for y in x['statistics']:
@@ -342,12 +436,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving virtual server list...")
     virt_list = b.LocalLB.VirtualServer.get_list()
     logging.debug("virt_list =\n%s" % pformat(virt_list))
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving statistics for all virtual servers...")
     virt_stats = b.LocalLB.VirtualServer.get_statistics(virtual_servers=virt_list)
     logging.debug("virt_stats =\n%s" % pformat(virt_stats))
     statistics = virt_stats['statistics']
+    ts = virt_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         vs_name = x['virtual_server']['name'].replace('.', '-')
         for y in x['statistics']:
@@ -366,12 +467,19 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
     logging.info("Retrieving pool list...")
     pool_list = b.LocalLB.Pool.get_list()
     logging.debug("pool_list =\n%s" % pformat(pool_list))
-    now = int(time.time())
-    logging.debug("Timestamp is %s." % now)
     logging.info("Retrieving statistics for all pools...")
     pool_stats = b.LocalLB.Pool.get_statistics(pool_names=pool_list)
     logging.debug("pool_stats =\n%s" % pformat(pool_stats))
     statistics = pool_stats['statistics']
+    ts = pool_stats['time_stamp']
+    if remote_ts:
+        logging.info("Calculating epoch time from remote timestamp...")
+        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                               ts['hour'], ts['minute'], ts['second'], tz)
+        logging.debug("Remote timestamp is %s." % now)
+    else:
+        now = timestamp_local()
+        logging.debug("Local timestamp is %s." % now)
     for x in statistics:
         pool_name = x['pool_name'].replace('.', '-')
         for y in x['statistics']:
@@ -384,7 +492,14 @@ def gather_f5_metrics(ltm_host, user, password, prefix):
                 metric = (stat_path, (now, stat_val))
                 logging.debug("metric = %s" % str(metric))
                 metric_list.append(metric)
-
+    # Reuse previous timestamp (a.k.a. fake it!)
+    logging.info("Retrieving active member count for all pools...")
+    active_member_count = b.LocalLB.Pool.get_active_member_count(pool_names=pool_list)
+    for pool_name, stat_val in zip(pool_list, active_member_count):
+        stat_path = "%s.pool.%s.active_member_count" % (prefix, pool_name)
+        metric = (stat_path, (now, stat_val))
+        logging.debug("metric = %s" % str(metric))
+        metric_list.append(metric)
 
     logging.info("There are %d metrics to load." % len(metric_list))
     return(metric_list)
@@ -426,10 +541,11 @@ def main():
     p.add_option('--log-filename', '-o', help='Logging output filename',
                  dest='logfile')
     p.add_option('-s', '--skip-upload', action="store_true", dest="skip_upload",
-                 default=False, help="Skip metric upload step")
+                 default=False, help="Skip metric upload step [%default]")
     p.add_option('-u', '--user', help='Username and password for iControl authentication', dest='user')
     p.add_option('-p', '--port', help="Carbon port [%default]", type="int", dest='carbon_port', default=2004)
     p.add_option('-c', '--chunk-size', help='Carbon chunk size [%default]', type="int", dest='chunk_size', default=500)
+    p.add_option('-t', '--timestamp', help='Timestamp authority (local | remote) [%default]', type="choice", dest="ts_auth", choices=['local', 'remote'], default="remote")
     p.add_option('--prefix', help="Metric name prefix [bigip.ltm_host]", dest="prefix")
 
     options, arguments = p.parse_args()
@@ -455,6 +571,13 @@ def main():
     logging.debug("chunk_size = %s" % chunk_size)
     carbon_port = options.carbon_port
     logging.debug("carbon_port = %s" % carbon_port)
+    ts_auth = options.ts_auth.strip().lower()
+    if ts_auth == "remote":
+        remote_ts = True
+    else:
+        remote_ts = False
+    logging.debug("timestamp_auth = %s" % ts_auth)
+    logging.debug("remote_ts = %s" % remote_ts)
 
     if (not options.user) or (len(options.user) < 1):
         # empty or non-existent --user option
@@ -486,7 +609,7 @@ def main():
     carbon_host = arguments[1]
     logging.debug("carbon_host = %s" % carbon_host)
 
-    metric_list = gather_f5_metrics(ltm_host, user, password, prefix)
+    metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
     if not skip_upload:
         logging.info("Uploading metrics...")
         send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
@@ -496,3 +619,10 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# to-do:
+#
+# - detect connection failures, ie. unable to connect to server
+# - put each metric collection in a try expect and return partial
+
