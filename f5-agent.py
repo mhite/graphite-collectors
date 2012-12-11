@@ -110,7 +110,9 @@ def convert_to_epoch(year, month, day, hour, minute, second, tz):
     """
     dt = datetime(year, month, day, hour, minute, second, tzinfo=tz)
     logging.debug("dt = %s" % dt)
-    epoch = int((dt - datetime(1970, 1, 1, tzinfo=TZFixedOffset(0, "UTC"))).total_seconds())
+    td = dt - datetime(1970, 1, 1, tzinfo=TZFixedOffset(0, "UTC"))
+    logging.debug("td = %s" % td)
+    epoch = td.seconds + td.days * 24 * 3600
     logging.debug("epoch = %s" % epoch)
     return(epoch)
 
