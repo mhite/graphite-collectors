@@ -483,7 +483,7 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
             high = y['value']['high']
             low = y['value']['low']
             stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.snat_pool.%s.%s" % (prefix, trans_addr, stat_name)
+            stat_path = "%s.snat_translation.%s.%s" % (prefix, trans_addr, stat_name)
             metric = (stat_path, (now, stat_val))
             logging.debug("metric = %s" % str(metric))
             metric_list.append(metric)
