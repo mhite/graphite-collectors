@@ -14,8 +14,11 @@ import logging
 import getpass
 from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
+import sys
+import json
 
-VERSION="1.23"
+
+VERSION="1.3"
 
 # list of pool statistics to monitor
 
@@ -88,7 +91,9 @@ def convert_to_64_bit(high, low):
         high = high + (1 << 32)
     if low < 0:
         low = low + (1 << 32)
-    return long((high << 32) | low)
+    value = long((high << 32) | low)
+    assert(value >= 0)
+    return value
 
 
 def chunks(l, n):
@@ -122,10 +127,14 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
     """ Connects to an F5 via iControl and pulls statistics.
     """
     metric_list = []
-    logging.info("Connecting to BIG-IP and pulling statistics...")
-    b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
-    logging.info("Requesting session...")
-    b = b.with_session_id()
+    try:
+        logging.info("Connecting to BIG-IP and pulling statistics...")
+        b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
+        logging.info("Requesting session...")
+        b = b.with_session_id()
+    except bigsuds.ConnectionError, detail:
+        logging.critical("Unable to connect to BIG-IP. Details: %s" % pformat(detail))
+        sys.exit(1)
     logging.info("Retrieving time zone information...")
     time_zone = b.System.SystemInfo.get_time_zone()
     logging.debug("time_zone = %s" % pformat(time_zone))
@@ -587,6 +596,25 @@ def send_metrics(carbon_host, carbon_port, metric_list, chunk_size):
     sock.close()
 
 
+def write_json_metrics(metric_list, filename):
+    """ Write JSON encoded metric_list to disk for later replay.
+    """
+    metric_list_json = json.dumps(metric_list)
+    logging.debug("metric_list_json = %s" % pformat(metric_list_json))
+    with open(filename, "w") as f:
+        f.write(metric_list_json)
+
+
+def read_json_metrics(filename):
+    """ Read JSON encoded data from disk.
+    """
+    with open(filename, "r") as f:
+        metric_list_json = f.read()
+    metric_list = json.loads(metric_list_json)
+    logging.debug("metric_list = %s" % pformat(metric_list))
+    return(metric_list)
+
+
 def main():
     p = optparse.OptionParser(version=VERSION,
                               usage="usage: %prog [options] ltm_host carbon_host",
@@ -601,8 +629,11 @@ def main():
                  default=False, help="Skip metric upload step [%default]")
     p.add_option('-u', '--user', help='Username and password for iControl authentication', dest='user')
     p.add_option('-p', '--port', help="Carbon port [%default]", type="int", dest='carbon_port', default=2004)
+    p.add_option('-r', '--carbon-retries', help="Number of carbon server delivery attempts [%default]", type="int", dest="carbon_retries", default=2)
+    p.add_option('-i', '--carbon-interval', help="Interval between carbon delivery attempts [%default]", type="int", dest="carbon_interval", default=30)
+    p.add_option('-f', '--upload-filename', help="Recovery JSON-encoded file to upload to carbon server", dest="upload_filename")
     p.add_option('-c', '--chunk-size', help='Carbon chunk size [%default]', type="int", dest='chunk_size', default=500)
-    p.add_option('-t', '--timestamp', help='Timestamp authority (local | remote) [%default]', type="choice", dest="ts_auth", choices=['local', 'remote'], default="remote")
+    p.add_option('-t', '--timestamp', help='Timestamp authority (local | remote) [%default]', type="choice", dest="ts_auth", choices=['local', 'remote'], default="local")
     p.add_option('--prefix', help="Metric name prefix [bigip.ltm_host]", dest="prefix")
 
     options, arguments = p.parse_args()
@@ -628,6 +659,11 @@ def main():
     logging.debug("chunk_size = %s" % chunk_size)
     carbon_port = options.carbon_port
     logging.debug("carbon_port = %s" % carbon_port)
+    carbon_retries = options.carbon_retries
+    logging.debug("carbon_retries = %s" % carbon_retries)
+    carbon_interval = options.carbon_interval
+    logging.debug("carbon_interval = %s" % carbon_interval)
+    upload_filename = options.upload_filename
     ts_auth = options.ts_auth.strip().lower()
     if ts_auth == "remote":
         remote_ts = True
@@ -636,21 +672,21 @@ def main():
     logging.debug("timestamp_auth = %s" % ts_auth)
     logging.debug("remote_ts = %s" % remote_ts)
 
-    if (not options.user) or (len(options.user) < 1):
-        # empty or non-existent --user option
-        # need to gather user and password
-        user = raw_input("Enter username:")
-        password = getpass.getpass("Enter password for user '%s':" % user)
-    elif ":" in options.user:
-        # --user option present with user and password
-        user, password = options.user.split(':', 1)
-    else:
-        # --user option present with no password
-        user = options.user
-        password = getpass.getpass("Enter password for user '%s':" % user)
-
-    logging.debug("user = %s" % user)
-    logging.debug("password = %s" % password)
+    if not upload_filename:
+        if (not options.user) or (len(options.user) < 1):
+            # empty or non-existent --user option
+            # need to gather user and password
+            user = raw_input("Enter username:")
+            password = getpass.getpass("Enter password for user '%s':" % user)
+        elif ":" in options.user:
+            # --user option present with user and password
+            user, password = options.user.split(':', 1)
+        else:
+            # --user option present with no password
+            user = options.user
+            password = getpass.getpass("Enter password for user '%s':" % user)
+        logging.debug("user = %s" % user)
+        logging.debug("password = %s" % password)
 
     ltm_host = arguments[0]
     logging.debug("ltm_host = %s" % ltm_host)
@@ -666,12 +702,56 @@ def main():
     carbon_host = arguments[1]
     logging.debug("carbon_host = %s" % carbon_host)
 
-    metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
+    start_timestamp = timestamp_local()
+    logging.debug("start_timestamp = %s" % start_timestamp)
+
+    if upload_filename:
+        logging.info("Attempting to load JSON from \"%s\"..." % upload_filename)
+        try:
+            with open(upload_filename) as data_file:
+                metric_list = json.load(data_file)
+        except IOError, detail:
+            logging.critical("Unable to load file: \"%s\"" % detail)
+            sys.exit(1)
+        except ValueError, detail:
+            logging.critical("Could not parse JSON: \"%s\"" % detail)
+            sys.exit(1)
+    else:
+        metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
+
     if not skip_upload:
-        logging.info("Uploading metrics...")
-        send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
+        upload_attempts = 0
+        upload_success = False
+        max_attempts = carbon_retries + 1
+        while not upload_success and (upload_attempts < max_attempts):
+            upload_attempts += 1
+            logging.info("Uploading metrics (try #%d/%d)..." % (upload_attempts, max_attempts))
+            try:
+                send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
+            except Exception, detail:
+                logging.error("Unable to upload metrics.")
+                logging.debug(Exception)
+                logging.debug(detail)
+                upload_success = False
+                if upload_attempts < max_attempts:  # don't sleep on last run
+                    logging.info("Sleeping %d seconds before retry..." % carbon_interval)
+                    time.sleep(carbon_interval)
+            else:
+                upload_success = True
+        if not upload_success:
+            logging.error("Unable to upload metrics after %d attempts." % upload_attempts)
+            if not upload_filename:  # don't resave a replay upload attempt
+                logging.info("Saving collected data to local disk for later replay...")
+                date_str = datetime.now().strftime("%Y%m%dT%H%M%S")
+                logging.debug("date_str = %s" % date_str)
+                write_json_metrics(metric_list, "%s_%s_fail.json" % (prefix, date_str))
     else:
         logging.info("Skipping upload step.")
+
+    finish_timestamp = timestamp_local()
+    logging.debug("finish_timestamp = %s" % finish_timestamp)
+    runtime = finish_timestamp - start_timestamp
+    logging.info("Elapsed time in seconds is %d." % runtime)
 
 
 if __name__ == '__main__':
@@ -682,4 +762,5 @@ if __name__ == '__main__':
 #
 # - detect connection failures, ie. unable to connect to server
 # - put each metric collection in a try expect and return partial
+# - reload capabilities should be moved into separate utility
 
