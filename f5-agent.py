@@ -2,7 +2,7 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 12/10/2012
+# 12/18/2012
 
 import bigsuds
 import time
@@ -101,6 +101,33 @@ def chunks(l, n):
     """
     for i in xrange(0, len(l), n):
         yield l[i:i+n]
+
+
+def send_metrics(carbon_host, carbon_port, metric_list, chunk_size):
+    """
+    Connects to a Carbon server and sends chunked metrics as
+    a pickled data structure.
+    """
+    # Break metric list into chunked list
+
+    logging.info("Chunking metrics into chunks of %d..." % chunk_size)
+    chunked_metrics = chunks(metric_list, chunk_size)
+
+    # Transmit data to carbon server
+
+    logging.info("Connecting to graphite...")
+    sock = socket.socket()
+    sock.connect((carbon_host, carbon_port))
+    for n, x in enumerate(chunked_metrics):
+        logging.info("Pickling chunk %d..." % n)
+        payload = pickle.dumps(x)
+        header = struct.pack("!L", len(payload))
+        message = header + payload
+        logging.info("Message size is %d." % len(message))
+        logging.info("Sending data...")
+        sock.sendall(message)
+    logging.info("Closing socket...")
+    sock.close()
 
 
 def timestamp_local():
@@ -564,36 +591,18 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
             metric = (stat_path, (now, stat_val))
             logging.debug("metric = %s" % str(metric))
             metric_list.append(metric)
+        logging.info("Retrieving member count for all pools...")
+        pool_members = b.LocalLB.Pool.get_member_v2(pool_names=pool_list)
+        pool_member_count = [len(x) for x in pool_members]
+        for pool_name, stat_val in zip(pool_list, pool_member_count):
+            stat_path = "%s.pool.%s.member_count" % (prefix, pool_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
     else:
-        logging.info("Pool list is empty, skipping active member count retrieval.")
-
+        logging.info("Pool list is empty, skipping member count retrieval.")
     logging.info("There are %d metrics to load." % len(metric_list))
     return(metric_list)
-
-
-def send_metrics(carbon_host, carbon_port, metric_list, chunk_size):
-    """ Connects to a Carbon server and sends metrics.
-    """
-    # Break metric list into chunked list
-
-    logging.info("Chunking metrics into chunks of %d..." % chunk_size)
-    chunked_metrics = chunks(metric_list, chunk_size)
-
-    # Transmit data to carbon server
-
-    logging.info("Connecting to graphite...")
-    sock = socket.socket()
-    sock.connect((carbon_host, carbon_port))
-    for n, x in enumerate(chunked_metrics):
-        logging.info("Pickling chunk %d..." % n)
-        payload = pickle.dumps(x)
-        header = struct.pack("!L", len(payload))
-        message = header + payload
-        logging.info("Message size is %d." % len(message))
-        logging.info("Sending data...")
-        sock.sendall(message)
-    logging.info("Closing socket...")
-    sock.close()
 
 
 def write_json_metrics(metric_list, filename):
@@ -603,16 +612,6 @@ def write_json_metrics(metric_list, filename):
     logging.debug("metric_list_json = %s" % pformat(metric_list_json))
     with open(filename, "w") as f:
         f.write(metric_list_json)
-
-
-def read_json_metrics(filename):
-    """ Read JSON encoded data from disk.
-    """
-    with open(filename, "r") as f:
-        metric_list_json = f.read()
-    metric_list = json.loads(metric_list_json)
-    logging.debug("metric_list = %s" % pformat(metric_list))
-    return(metric_list)
 
 
 def main():
@@ -631,7 +630,6 @@ def main():
     p.add_option('-p', '--port', help="Carbon port [%default]", type="int", dest='carbon_port', default=2004)
     p.add_option('-r', '--carbon-retries', help="Number of carbon server delivery attempts [%default]", type="int", dest="carbon_retries", default=2)
     p.add_option('-i', '--carbon-interval', help="Interval between carbon delivery attempts [%default]", type="int", dest="carbon_interval", default=30)
-    p.add_option('-f', '--upload-filename', help="Recovery JSON-encoded file to upload to carbon server", dest="upload_filename")
     p.add_option('-c', '--chunk-size', help='Carbon chunk size [%default]', type="int", dest='chunk_size', default=500)
     p.add_option('-t', '--timestamp', help='Timestamp authority (local | remote) [%default]', type="choice", dest="ts_auth", choices=['local', 'remote'], default="local")
     p.add_option('--prefix', help="Metric name prefix [bigip.ltm_host]", dest="prefix")
@@ -663,7 +661,6 @@ def main():
     logging.debug("carbon_retries = %s" % carbon_retries)
     carbon_interval = options.carbon_interval
     logging.debug("carbon_interval = %s" % carbon_interval)
-    upload_filename = options.upload_filename
     ts_auth = options.ts_auth.strip().lower()
     if ts_auth == "remote":
         remote_ts = True
@@ -672,21 +669,20 @@ def main():
     logging.debug("timestamp_auth = %s" % ts_auth)
     logging.debug("remote_ts = %s" % remote_ts)
 
-    if not upload_filename:
-        if (not options.user) or (len(options.user) < 1):
-            # empty or non-existent --user option
-            # need to gather user and password
-            user = raw_input("Enter username:")
-            password = getpass.getpass("Enter password for user '%s':" % user)
-        elif ":" in options.user:
-            # --user option present with user and password
-            user, password = options.user.split(':', 1)
-        else:
-            # --user option present with no password
-            user = options.user
-            password = getpass.getpass("Enter password for user '%s':" % user)
-        logging.debug("user = %s" % user)
-        logging.debug("password = %s" % password)
+    if (not options.user) or (len(options.user) < 1):
+        # empty or non-existent --user option
+        # need to gather user and password
+        user = raw_input("Enter username:")
+        password = getpass.getpass("Enter password for user '%s':" % user)
+    elif ":" in options.user:
+        # --user option present with user and password
+        user, password = options.user.split(':', 1)
+    else:
+        # --user option present with no password
+        user = options.user
+        password = getpass.getpass("Enter password for user '%s':" % user)
+    logging.debug("user = %s" % user)
+    logging.debug("password = %s" % password)
 
     ltm_host = arguments[0]
     logging.debug("ltm_host = %s" % ltm_host)
@@ -705,19 +701,7 @@ def main():
     start_timestamp = timestamp_local()
     logging.debug("start_timestamp = %s" % start_timestamp)
 
-    if upload_filename:
-        logging.info("Attempting to load JSON from \"%s\"..." % upload_filename)
-        try:
-            with open(upload_filename) as data_file:
-                metric_list = json.load(data_file)
-        except IOError, detail:
-            logging.critical("Unable to load file: \"%s\"" % detail)
-            sys.exit(1)
-        except ValueError, detail:
-            logging.critical("Could not parse JSON: \"%s\"" % detail)
-            sys.exit(1)
-    else:
-        metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
+    metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
 
     if not skip_upload:
         upload_attempts = 0
@@ -740,11 +724,10 @@ def main():
                 upload_success = True
         if not upload_success:
             logging.error("Unable to upload metrics after %d attempts." % upload_attempts)
-            if not upload_filename:  # don't resave a replay upload attempt
-                logging.info("Saving collected data to local disk for later replay...")
-                date_str = datetime.now().strftime("%Y%m%dT%H%M%S")
-                logging.debug("date_str = %s" % date_str)
-                write_json_metrics(metric_list, "%s_%s_fail.json" % (prefix, date_str))
+            logging.info("Saving collected data to local disk for later replay...")
+            date_str = datetime.now().strftime("%Y%m%dT%H%M%S")
+            logging.debug("date_str = %s" % date_str)
+            write_json_metrics(metric_list, "%s_%s_fail.json" % (prefix, date_str))
     else:
         logging.info("Skipping upload step.")
 
