@@ -2,7 +2,7 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 12/18/2012
+# 3/7/2013
 
 import bigsuds
 import time
@@ -18,7 +18,7 @@ import sys
 import json
 
 
-VERSION="1.3"
+VERSION="1.31"
 
 # list of pool statistics to monitor
 
@@ -39,15 +39,9 @@ VS_STATISTICS = ['client_side_bytes_in',
                  'client_side_packets_in',
                  'client_side_packets_out',
                  'client_side_total_connections',
-                 'maximum_connection_duration',
                  'mean_connection_duration',
-                 'minimum_connection_duration',
-                 'no_node_errors',
                  'total_requests',
-                 'virtual_server_five_min_avg_cpu_usage',
-                 'virtual_server_five_sec_avg_cpu_usage',
-                 'virtual_server_one_min_avg_cpu_usage',
-                 'virtual_server_total_cpu_cycles']
+                 'virtual_server_five_min_avg_cpu_usage']
 
 # list of interfaces to monitor
 
