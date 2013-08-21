@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
