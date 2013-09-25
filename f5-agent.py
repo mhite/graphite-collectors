@@ -2,23 +2,20 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 3/7/2013
+# 9/25/2013
 
 import bigsuds
-import time
-import socket
-import pickle
-import struct
-import optparse
-import logging
 import getpass
+import json
+import logging
+import optparse
+import sys
+import time
+from carbonita import timestamp_local, send_metrics
 from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
-import sys
-import json
 
-
-VERSION="1.31"
+VERSION="1.33"
 
 # list of pool statistics to monitor
 
@@ -53,7 +50,21 @@ CLIENT_SSL_STATISTICS = ['ssl_five_min_avg_tot_conns',
                          'ssl_five_sec_avg_tot_conns',
                          'ssl_one_min_avg_tot_conns',
                          'ssl_common_total_native_connections',
-                         'ssl_common_total_compatible_mode_connections']
+                         'ssl_common_total_compatible_mode_connections',
+                         'ssl_cipher_adh_key_exchange',
+                         'ssl_cipher_dh_rsa_key_exchange',
+                         'ssl_cipher_edh_rsa_key_exchange',
+                         'ssl_cipher_rsa_key_exchange',
+                         'ssl_cipher_ecdhe_rsa_key_exchange',
+                         'ssl_cipher_null_bulk',
+                         'ssl_cipher_aes_bulk',
+                         'ssl_cipher_des_bulk',
+                         'ssl_cipher_idea_bulk',
+                         'ssl_cipher_rc2_bulk',
+                         'ssl_cipher_rc4_bulk',
+                         'ssl_cipher_null_digest',
+                         'ssl_cipher_md5_digest',
+                         'ssl_cipher_sha_digest']
 
 # Host
 
@@ -88,48 +99,6 @@ def convert_to_64_bit(high, low):
     value = long((high << 32) | low)
     assert(value >= 0)
     return value
-
-
-def chunks(l, n):
-    """ Yield successive n-sized chunks from l.
-    """
-    for i in xrange(0, len(l), n):
-        yield l[i:i+n]
-
-
-def send_metrics(carbon_host, carbon_port, metric_list, chunk_size):
-    """
-    Connects to a Carbon server and sends chunked metrics as
-    a pickled data structure.
-    """
-    # Break metric list into chunked list
-
-    logging.info("Chunking metrics into chunks of %d..." % chunk_size)
-    chunked_metrics = chunks(metric_list, chunk_size)
-
-    # Transmit data to carbon server
-
-    logging.info("Connecting to graphite...")
-    sock = socket.socket()
-    sock.connect((carbon_host, carbon_port))
-    for n, x in enumerate(chunked_metrics):
-        logging.info("Pickling chunk %d..." % n)
-        payload = pickle.dumps(x)
-        header = struct.pack("!L", len(payload))
-        message = header + payload
-        logging.info("Message size is %d." % len(message))
-        logging.info("Sending data...")
-        sock.sendall(message)
-    logging.info("Closing socket...")
-    sock.close()
-
-
-def timestamp_local():
-    """Return local epoch timestamp.
-    """
-    epoch = int(time.time())
-    logging.debug("epoch = %s" % epoch)
-    return(epoch)
 
 
 def convert_to_epoch(year, month, day, hour, minute, second, tz):
