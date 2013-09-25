@@ -2,66 +2,21 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 8/19/2013
+# 9/25/2013
 
-import xmltodict
-import time
-import socket
-import pickle
-import struct
-import optparse
-import logging
 import getpass
-import sys
 import json
+import logging
+import optparse
+import sys
+import time
+import xmltodict
+from carbonita import timestamp_local, send_metrics
 from datetime import datetime
-from pprint import pformat
 from ncclient import manager
+from pprint import pformat
 
-VERSION="1.1"
-
-
-def chunks(l, n):
-    """ Yield successive n-sized chunks from l.
-    """
-    for i in xrange(0, len(l), n):
-        yield l[i:i+n]
-
-
-def send_metrics(carbon_host, carbon_port, metric_list, chunk_size):
-    """
-    Connects to a Carbon server and sends chunked metrics as
-    a pickled data structure.
-    """
-    # Break metric list into chunked list
-
-    logging.info("Chunking metrics into chunks of %d..." % chunk_size)
-    chunked_metrics = chunks(metric_list, chunk_size)
-
-    # Transmit data to carbon server
-
-    logging.info("Connecting to graphite...")
-    sock = socket.socket()
-    sock.connect((carbon_host, carbon_port))
-    for n, x in enumerate(chunked_metrics):
-        logging.info("Pickling chunk %d..." % n)
-        payload = pickle.dumps(x)
-        header = struct.pack("!L", len(payload))
-        message = header + payload
-        logging.info("Message size is %d." % len(message))
-        logging.info("Sending data...")
-        sock.sendall(message)
-    logging.info("Closing socket...")
-    sock.close()
-
-
-def timestamp_local():
-    """Return local epoch timestamp.
-    """
-    epoch = long(time.time())
-    logging.debug("epoch = %s" % epoch)
-    return(epoch)
-
+VERSION="1.2"
 
 def gather_juniper_metrics(juniper_host, user, password, port, prefix):
     """ Connects to a Juniper via NetConf and pulls statistics.
@@ -458,7 +413,7 @@ def main():
 
     # right number of arguments?
     if len(arguments) != 2:
-        p.error("wrong number of arguments: ltm_host and carbon_host required")
+        p.error("wrong number of arguments: juniper_host and carbon_host required")
 
     LOGGING_LEVELS = {'critical': logging.CRITICAL,
                       'error': logging.ERROR,
