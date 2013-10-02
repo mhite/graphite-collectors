@@ -2,7 +2,7 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 9/25/2013
+# 10/2/2013
 
 import getpass
 import json
@@ -16,7 +16,7 @@ from datetime import datetime
 from ncclient import manager
 from pprint import pformat
 
-VERSION="1.2"
+VERSION="1.3"
 
 def gather_juniper_metrics(juniper_host, user, password, port, prefix):
     """ Connects to a Juniper via NetConf and pulls statistics.
@@ -52,78 +52,87 @@ def gather_juniper_metrics(juniper_host, user, password, port, prefix):
         for x in response_dict["rpc-reply"]["probe-results"]["probe-test-results"]:
             probe_name = x["test-name"]
             logging.debug("probe_name = %s" % probe_name)
-            rtt = x["probe-single-results"]["rtt"]
-            logging.debug("rtt = %s" % rtt)
-            stat_name = 'rtt'
-            stat_val = long(rtt)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            egress = x["probe-single-results"]["egress"]
-            logging.debug("egress = %s" % egress)
-            stat_name = 'egress'
-            stat_val = long(egress)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            ingress = x["probe-single-results"]["ingress"]
-            logging.debug("ingress = %s" % ingress)
-            stat_name = 'ingress'
-            stat_val = long(ingress)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            egress_jitter = x["probe-single-results"]["egress-jitter"]
-            logging.debug("egress_jitter = %s" % egress_jitter)
-            stat_name = 'egress-jitter'
-            stat_val = long(egress_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            ingress_jitter =x["probe-single-results"]["ingress-jitter"]
-            logging.debug("ingress_jitter = %s" % ingress_jitter)
-            stat_name = 'ingress-jitter'
-            stat_val = long(ingress_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            round_trip_jitter = x["probe-single-results"]["round-trip-jitter"]
-            logging.debug("round_trip_jitter = %s" % round_trip_jitter)
-            stat_name = 'round-trip-jitter'
-            stat_val = long(round_trip_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            egress_interarrival_jitter = x["probe-single-results"]["egress-interarrival-jitter"]
-            logging.debug("egress_interarrival_jitter = %s" % egress_interarrival_jitter)
-            stat_name = 'egress-interarrival-jitter'
-            stat_val = long(egress_interarrival_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            ingress_interarrival_jitter = x["probe-single-results"]["ingress-interarrival-jitter"]
-            logging.debug("ingress_interarrival_jitter = %s" % ingress_interarrival_jitter)
-            stat_name = 'ingress-interarrival-jitter'
-            stat_val = long(ingress_interarrival_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            round_trip_interarrival_jitter = x["probe-single-results"]["round-trip-interarrival-jitter"]
-            logging.debug("round_trip_interarrival_jitter = %s" % round_trip_interarrival_jitter)
-            stat_name = 'round-trip-interarrival-jitter'
-            stat_val = long(round_trip_interarrival_jitter)
-            stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
+            if "rtt" in x["probe-single-results"]:
+                rtt = x["probe-single-results"]["rtt"]
+                logging.debug("rtt = %s" % rtt)
+                stat_name = 'rtt'
+                stat_val = long(rtt)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "egress" in x["probe-single-results"]:
+                egress = x["probe-single-results"]["egress"]
+                logging.debug("egress = %s" % egress)
+                stat_name = 'egress'
+                stat_val = long(egress)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "ingress" in x["probe-single-results"]:
+                ingress = x["probe-single-results"]["ingress"]
+                logging.debug("ingress = %s" % ingress)
+                stat_name = 'ingress'
+                stat_val = long(ingress)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "egress-jitter" in x["probe-single-results"]:
+                egress_jitter = x["probe-single-results"]["egress-jitter"]
+                logging.debug("egress_jitter = %s" % egress_jitter)
+                stat_name = 'egress-jitter'
+                stat_val = long(egress_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "ingress-jitter" in x["probe-single-results"]:
+                ingress_jitter = x["probe-single-results"]["ingress-jitter"]
+                logging.debug("ingress_jitter = %s" % ingress_jitter)
+                stat_name = 'ingress-jitter'
+                stat_val = long(ingress_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "round-trip-jitter" in x["probe-single-results"]:
+                round_trip_jitter = x["probe-single-results"]["round-trip-jitter"]
+                logging.debug("round_trip_jitter = %s" % round_trip_jitter)
+                stat_name = 'round-trip-jitter'
+                stat_val = long(round_trip_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "egress-interarrival-jitter" in x["probe-single-results"]:
+                egress_interarrival_jitter = x["probe-single-results"]["egress-interarrival-jitter"]
+                logging.debug("egress_interarrival_jitter = %s" % egress_interarrival_jitter)
+                stat_name = 'egress-interarrival-jitter'
+                stat_val = long(egress_interarrival_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "ingress-interarrival-jitter" in x["probe-single-results"]:
+                ingress_interarrival_jitter = x["probe-single-results"]["ingress-interarrival-jitter"]
+                logging.debug("ingress_interarrival_jitter = %s" % ingress_interarrival_jitter)
+                stat_name = 'ingress-interarrival-jitter'
+                stat_val = long(ingress_interarrival_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+            if "round-trip-interarrival-jitter" in x["probe-single-results"]:
+                round_trip_interarrival_jitter = x["probe-single-results"]["round-trip-interarrival-jitter"]
+                logging.debug("round_trip_interarrival_jitter = %s" % round_trip_interarrival_jitter)
+                stat_name = 'round-trip-interarrival-jitter'
+                stat_val = long(round_trip_interarrival_jitter)
+                stat_path = "%s.probe.%s.%s" % (prefix, probe_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
 
     now = timestamp_local()
     logging.debug("Local timestamp is %s." % now)
