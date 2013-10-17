@@ -50,40 +50,41 @@ def gather_srx_metrics(juniper_host, user, password, port, prefix):
         logging.debug("detail = %s" % pformat(detail))
         pass
 
-    for x in response_dict['rpc-reply']['flow-statistics-all']:
-        spu_id = x['flow-spu-id']
-        if "Summary" not in spu_id:
-            # fix stupid spu_id formatting
-            spu_id_l = spu_id.split(" ")[-2:]
-            spu_id = "%s-%s" % (spu_id_l[0].lower(), spu_id_l[1][0:-1].lower())
-            session_count_valid = x['flow-session-count-valid']
-            pkt_count_fwd = x['flow-pkt-count-fwd']
-            pkt_count_drop = x['flow-pkt-count-drop']
-            frag_count_fwd = x['flow-frag-count-fwd']
-            stat_name = 'session-count-valid'
-            stat_val = long(session_count_valid)
-            stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            stat_name = 'pkt-count-fwd'
-            stat_val = long(pkt_count_fwd)
-            stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            stat_name = 'pkt-count-fwd'
-            stat_val = long(pkt_count_drop)
-            stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-            stat_name = 'frag-count-fwd'
-            stat_val = long(frag_count_fwd)
-            stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
+    if 'flow-statistics-all' in response_dict['rpc-reply']:
+        for x in response_dict['rpc-reply']['flow-statistics-all']:
+            spu_id = x['flow-spu-id']
+            if "Summary" not in spu_id:
+                # fix stupid spu_id formatting
+                spu_id_l = spu_id.split(" ")[-2:]
+                spu_id = "%s-%s" % (spu_id_l[0].lower(), spu_id_l[1][0:-1].lower())
+                session_count_valid = x['flow-session-count-valid']
+                pkt_count_fwd = x['flow-pkt-count-fwd']
+                pkt_count_drop = x['flow-pkt-count-drop']
+                frag_count_fwd = x['flow-frag-count-fwd']
+                stat_name = 'session-count-valid'
+                stat_val = long(session_count_valid)
+                stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+                stat_name = 'pkt-count-fwd'
+                stat_val = long(pkt_count_fwd)
+                stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+                stat_name = 'pkt-count-fwd'
+                stat_val = long(pkt_count_drop)
+                stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
+                stat_name = 'frag-count-fwd'
+                stat_val = long(frag_count_fwd)
+                stat_path = "%s.flow.%s.%s" % (prefix, spu_id, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
 
     # source NAT interface statistics
 
@@ -105,22 +106,23 @@ def gather_srx_metrics(juniper_host, user, password, port, prefix):
         logging.debug("detail = %s" % pformat(detail))
         pass
 
-    for x in response_dict['rpc-reply']['interface-nat-ports-information']['interface-nat-ports-entry']:
-        pool_index = x['pool-index']
-        allocated_single_ports = x['single-ports-allocated']
-        allocated_twin_ports = x['twin-ports-allocated']
-        stat_name = 'allocated-single-port'
-        stat_val = long(allocated_single_ports)
-        stat_path = "%s.source-nat-interface.%s.%s" % (prefix, pool_index, stat_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
-        stat_name = 'allocated-twin-port'
-        stat_val = long(allocated_twin_ports)
-        stat_path = "%s.source-nat-interface.%s.%s" % (prefix, pool_index, stat_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
+    if 'interface-nat-ports-information' in response_dict['rpc-reply'] and 'interface-nat-ports-entry' in response_dict['rpc-reply']['interface-nat-ports-information']:
+        for x in response_dict['rpc-reply']['interface-nat-ports-information']['interface-nat-ports-entry']:
+            pool_index = x['pool-index']
+            allocated_single_ports = x['single-ports-allocated']
+            allocated_twin_ports = x['twin-ports-allocated']
+            stat_name = 'allocated-single-port'
+            stat_val = long(allocated_single_ports)
+            stat_path = "%s.source-nat-interface.%s.%s" % (prefix, pool_index, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
+            stat_name = 'allocated-twin-port'
+            stat_val = long(allocated_twin_ports)
+            stat_path = "%s.source-nat-interface.%s.%s" % (prefix, pool_index, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
 
     # source NAT pool statistics
 
@@ -144,29 +146,30 @@ def gather_srx_metrics(juniper_host, user, password, port, prefix):
         logging.debug("detail = %s" % pformat(detail))
         pass
 
-    for x in response_dict['rpc-reply']['source-nat-pool-detail-information']['source-nat-pool-info-entry']:
-        pool_name = x['pool-name']
-        address_pool_hits = x['address-pool-hits']
-        allocated_single_ports = x['source-pool-address-range']['single-port']
-        allocated_twin_ports = x['source-pool-address-range']['twin-port']
-        stat_name = 'address-pool-hits'
-        stat_val = long(address_pool_hits)
-        stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
-        stat_name = 'allocated-single-port'
-        stat_val = long(allocated_single_ports)
-        stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
-        stat_name = 'allocated-twin-port'
-        stat_val = long(allocated_twin_ports)
-        stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
-        metric = (stat_path, (now, stat_val))
-        logging.debug("metric = %s" % str(metric))
-        metric_list.append(metric)
+    if 'source-nat-pool-detail-information' in response_dict['rpc-reply'] and 'source-nat-pool-info-entry' in response_dict['rpc-reply']['source-nat-pool-detail-information']:
+        for x in response_dict['rpc-reply']['source-nat-pool-detail-information']['source-nat-pool-info-entry']:
+            pool_name = x['pool-name']
+            address_pool_hits = x['address-pool-hits']
+            allocated_single_ports = x['source-pool-address-range']['single-port']
+            allocated_twin_ports = x['source-pool-address-range']['twin-port']
+            stat_name = 'address-pool-hits'
+            stat_val = long(address_pool_hits)
+            stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
+            stat_name = 'allocated-single-port'
+            stat_val = long(allocated_single_ports)
+            stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
+            stat_name = 'allocated-twin-port'
+            stat_val = long(allocated_twin_ports)
+            stat_path = "%s.source-nat-pool.%s.%s" % (prefix, pool_name, stat_name)
+            metric = (stat_path, (now, stat_val))
+            logging.debug("metric = %s" % str(metric))
+            metric_list.append(metric)
 
     # interface stats
 
@@ -188,140 +191,141 @@ def gather_srx_metrics(juniper_host, user, password, port, prefix):
         logging.debug("detail = %s" % pformat(detail))
         pass
 
-    for x in response_dict['rpc-reply']['interface-information']['physical-interface']:
-        if any([x['name'].startswith(name) for name in ('xe', 'lo', 'ae', 'ge')]) and x['admin-status']['#text'] == 'up' and x['oper-status'] == 'up':
-                logging.debug("physical name = %s " % x['name'])
-                int_name = x['name'].replace('/', '_').replace('.', '_')
-                if 'input-bps' in x['traffic-statistics']:
-                    logging.debug("input-bps = %s" % x['traffic-statistics']['input-bps'])
-                    stat_name = 'input-bps'
-                    stat_val = long(x['traffic-statistics']['input-bps'])
-                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
-                    logging.debug("metric = %s" % str(metric))
-                    metric_list.append(metric)
-                if 'output-bps' in x['traffic-statistics']:
-                    logging.debug("output-bps = %s" % x['traffic-statistics']['output-bps'])
-                    stat_name = 'output-bps'
-                    stat_val = long(x['traffic-statistics']['output-bps'])
-                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
-                    logging.debug("metric = %s" % str(metric))
-                    metric_list.append(metric)
-                if 'input-pps' in x['traffic-statistics']:
-                    logging.debug("input-pps = %s" % x['traffic-statistics']['input-pps'])
-                    stat_name = 'input-pps'
-                    stat_val = long(x['traffic-statistics']['input-pps'])
-                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
-                    logging.debug("metric = %s" % str(metric))
-                    metric_list.append(metric)
-                if 'output-pps' in x['traffic-statistics']:
-                    logging.debug("output-pps = %s" % x['traffic-statistics']['output-pps'])
-                    stat_name = 'output-pps'
-                    stat_val = long(x['traffic-statistics']['output-pps'])
-                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
-                    logging.debug("metric = %s" % str(metric))
-                    metric_list.append(metric)
-                if 'logical-interface' in x:
-                    if 'name' in x['logical-interface']:
-                        logging.debug("logical name = %s" % x['logical-interface']['name'])
-                        int_name = x['logical-interface']['name'].replace('/', '_').replace('.', '_')
-                        if 'traffic-statistics' in x['logical-interface']:
-                            logging.debug("logical input-packets = %s" % x['logical-interface']['traffic-statistics']['input-packets'])
-                            stat_name = 'input-packets'
-                            stat_val = long(x['logical-interface']['traffic-statistics']['input-packets'])
-                            stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                            metric = (stat_path, (now, stat_val))
-                            logging.debug("metric = %s" % str(metric))
-                            metric_list.append(metric)
-                            logging.debug("logical output-packets = %s" % x['logical-interface']['traffic-statistics']['output-packets'])
-                            stat_name = 'output-packets'
-                            stat_val = long(x['logical-interface']['traffic-statistics']['output-packets'])
-                            stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                            metric = (stat_path, (now, stat_val))
-                            logging.debug("metric = %s" % str(metric))
-                            metric_list.append(metric)
-                    else:
-                        # it's a list
-                        for y in x['logical-interface']:
-                            if 'name' in y:
-                                int_name = y['name'].replace('/', '_').replace('.', '_')
-                                logging.debug("logical name = %s" % y['name'])
-                                if 'traffic-statistics' in y:
-                                    logging.debug("logical input-packets = %s" % y['traffic-statistics']['input-packets'])
-                                    stat_name = 'input-packets'
-                                    stat_val = long(y['traffic-statistics']['input-packets'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical output-packets = %s" % y['traffic-statistics']['output-packets'])
-                                    stat_name = 'output-packets'
-                                    stat_val = long(y['traffic-statistics']['output-packets'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                if ('lag-traffic-statistics' in y) and ('lag-bundle' in y['lag-traffic-statistics']):
-                                    # it's a lag
-                                    logging.debug("logical input-packets = %s" % y['lag-traffic-statistics']['lag-bundle']['input-packets'])
-                                    stat_name = 'input-packets'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-packets'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical output-packets = %s" % y['lag-traffic-statistics']['lag-bundle']['output-packets'])
-                                    stat_name = 'output-packets'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-packets'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical input-pps = %s" % y['lag-traffic-statistics']['lag-bundle']['input-pps'])
-                                    stat_name = 'input-pps'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-pps'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical output-pps = %s" % y['lag-traffic-statistics']['lag-bundle']['output-pps'])
-                                    stat_name = 'output-pps'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-pps'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical input-bytes = %s" % y['lag-traffic-statistics']['lag-bundle']['input-bytes'])
-                                    stat_name = 'input-bytes'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-bytes'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical output-bytes = %s" % y['lag-traffic-statistics']['lag-bundle']['output-bytes'])
-                                    stat_name = 'output-bytes'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-bytes'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical input-bps = %s" % y['lag-traffic-statistics']['lag-bundle']['input-bps'])
-                                    stat_name = 'input-bps'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-bps'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
-                                    logging.debug("logical output-bps = %s" % y['lag-traffic-statistics']['lag-bundle']['output-bps'])
-                                    stat_name = 'output-bps'
-                                    stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-bps'])
-                                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
-                                    metric = (stat_path, (now, stat_val))
-                                    logging.debug("metric = %s" % str(metric))
-                                    metric_list.append(metric)
+    if 'interface-information' in response_dict['rpc-reply'] and 'physical-interface' in response_dict['rpc-reply']['interface-information']:
+        for x in response_dict['rpc-reply']['interface-information']['physical-interface']:
+            if any([x['name'].startswith(name) for name in ('xe', 'lo', 'ae', 'ge')]) and x['admin-status']['#text'] == 'up' and x['oper-status'] == 'up':
+                    logging.debug("physical name = %s " % x['name'])
+                    int_name = x['name'].replace('/', '_').replace('.', '_')
+                    if 'input-bps' in x['traffic-statistics']:
+                        logging.debug("input-bps = %s" % x['traffic-statistics']['input-bps'])
+                        stat_name = 'input-bps'
+                        stat_val = long(x['traffic-statistics']['input-bps'])
+                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                    if 'output-bps' in x['traffic-statistics']:
+                        logging.debug("output-bps = %s" % x['traffic-statistics']['output-bps'])
+                        stat_name = 'output-bps'
+                        stat_val = long(x['traffic-statistics']['output-bps'])
+                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                    if 'input-pps' in x['traffic-statistics']:
+                        logging.debug("input-pps = %s" % x['traffic-statistics']['input-pps'])
+                        stat_name = 'input-pps'
+                        stat_val = long(x['traffic-statistics']['input-pps'])
+                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                    if 'output-pps' in x['traffic-statistics']:
+                        logging.debug("output-pps = %s" % x['traffic-statistics']['output-pps'])
+                        stat_name = 'output-pps'
+                        stat_val = long(x['traffic-statistics']['output-pps'])
+                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                    if 'logical-interface' in x:
+                        if 'name' in x['logical-interface']:
+                            logging.debug("logical name = %s" % x['logical-interface']['name'])
+                            int_name = x['logical-interface']['name'].replace('/', '_').replace('.', '_')
+                            if 'traffic-statistics' in x['logical-interface']:
+                                logging.debug("logical input-packets = %s" % x['logical-interface']['traffic-statistics']['input-packets'])
+                                stat_name = 'input-packets'
+                                stat_val = long(x['logical-interface']['traffic-statistics']['input-packets'])
+                                stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                metric = (stat_path, (now, stat_val))
+                                logging.debug("metric = %s" % str(metric))
+                                metric_list.append(metric)
+                                logging.debug("logical output-packets = %s" % x['logical-interface']['traffic-statistics']['output-packets'])
+                                stat_name = 'output-packets'
+                                stat_val = long(x['logical-interface']['traffic-statistics']['output-packets'])
+                                stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                metric = (stat_path, (now, stat_val))
+                                logging.debug("metric = %s" % str(metric))
+                                metric_list.append(metric)
+                        else:
+                            # it's a list
+                            for y in x['logical-interface']:
+                                if 'name' in y:
+                                    int_name = y['name'].replace('/', '_').replace('.', '_')
+                                    logging.debug("logical name = %s" % y['name'])
+                                    if 'traffic-statistics' in y:
+                                        logging.debug("logical input-packets = %s" % y['traffic-statistics']['input-packets'])
+                                        stat_name = 'input-packets'
+                                        stat_val = long(y['traffic-statistics']['input-packets'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical output-packets = %s" % y['traffic-statistics']['output-packets'])
+                                        stat_name = 'output-packets'
+                                        stat_val = long(y['traffic-statistics']['output-packets'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                    if ('lag-traffic-statistics' in y) and ('lag-bundle' in y['lag-traffic-statistics']):
+                                        # it's a lag
+                                        logging.debug("logical input-packets = %s" % y['lag-traffic-statistics']['lag-bundle']['input-packets'])
+                                        stat_name = 'input-packets'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-packets'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical output-packets = %s" % y['lag-traffic-statistics']['lag-bundle']['output-packets'])
+                                        stat_name = 'output-packets'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-packets'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical input-pps = %s" % y['lag-traffic-statistics']['lag-bundle']['input-pps'])
+                                        stat_name = 'input-pps'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-pps'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical output-pps = %s" % y['lag-traffic-statistics']['lag-bundle']['output-pps'])
+                                        stat_name = 'output-pps'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-pps'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical input-bytes = %s" % y['lag-traffic-statistics']['lag-bundle']['input-bytes'])
+                                        stat_name = 'input-bytes'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-bytes'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical output-bytes = %s" % y['lag-traffic-statistics']['lag-bundle']['output-bytes'])
+                                        stat_name = 'output-bytes'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-bytes'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical input-bps = %s" % y['lag-traffic-statistics']['lag-bundle']['input-bps'])
+                                        stat_name = 'input-bps'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['input-bps'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
+                                        logging.debug("logical output-bps = %s" % y['lag-traffic-statistics']['lag-bundle']['output-bps'])
+                                        stat_name = 'output-bps'
+                                        stat_val = long(y['lag-traffic-statistics']['lag-bundle']['output-bps'])
+                                        stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                                        metric = (stat_path, (now, stat_val))
+                                        logging.debug("metric = %s" % str(metric))
+                                        metric_list.append(metric)
     logging.info("There are %d metrics to load." % len(metric_list))
     return(metric_list)
 
@@ -465,3 +469,4 @@ if __name__ == '__main__':
 # - put each metric collection in a try expect and return partial
 # - reload capabilities should be moved into separate utility
 # - handle: 2013-03-05 21:32:11 DEBUG: detail = SSHUnknownHostError('Unknown host key [5c:54:eb:d7:b0:53:d6:7a:3b:2c:ca:19:17:b1:7c:2c] for [172.20.0.3]',)
+# - handle: SSHError('Could not open socket to 172.22.9.132:8020',)
