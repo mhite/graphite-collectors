@@ -193,7 +193,7 @@ def gather_srx_metrics(juniper_host, user, password, port, prefix):
 
     if 'interface-information' in response_dict['rpc-reply'] and 'physical-interface' in response_dict['rpc-reply']['interface-information']:
         for x in response_dict['rpc-reply']['interface-information']['physical-interface']:
-            if any([x['name'].startswith(name) for name in ('xe', 'lo', 'ae', 'ge')]) and x['admin-status']['#text'] == 'up' and x['oper-status'] == 'up':
+            if any([x['name'].startswith(name) for name in ('xe', 'lo', 'ae', 'ge', 'reth')]) and x['admin-status']['#text'] == 'up' and x['oper-status'] == 'up':
                     logging.debug("physical name = %s " % x['name'])
                     int_name = x['name'].replace('/', '_').replace('.', '_')
                     if 'input-bps' in x['traffic-statistics']:
