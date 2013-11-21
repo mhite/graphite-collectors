@@ -29,6 +29,8 @@ POOL_STATISTICS = ['current_sessions',
                    'total_requests']
 
 # list of virtual server statistics to monitor
+# syn cookie statistics for virtual servers available
+# in 11.4+
 
 VS_STATISTICS = ['client_side_bytes_in',
                  'client_side_bytes_out',
@@ -38,7 +40,16 @@ VS_STATISTICS = ['client_side_bytes_in',
                  'client_side_total_connections',
                  'mean_connection_duration',
                  'total_requests',
-                 'virtual_server_five_min_avg_cpu_usage']
+                 'virtual_server_five_min_avg_cpu_usage',
+                 'virtual_server_syncookie_hw_instances',
+                 'virtual_server_syncookie_sw_instances',
+                 'virtual_server_syncookie_cache_usage',
+                 'virtual_server_syncookie_cache_overflows',
+                 'virtual_server_syncookie_sw_total',
+                 'virtual_server_syncookie_sw_accepts',
+                 'virtual_server_syncookie_sw_rejects',
+                 'virtual_server_syncookie_hw_total',
+                 'virtual_server_syncookie_hw_accepts']
 
 # list of interfaces to monitor
 
