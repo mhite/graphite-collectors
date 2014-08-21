@@ -358,30 +358,31 @@ def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts):
     logging.info("Retrieving list of trunks...")
     trunks = b.Networking.Trunk.get_list()
     logging.debug("trunks =\n%s" % pformat(trunks))
-    logging.info("Retrieving trunk statistics...")
-    trunk_stats = b.Networking.Trunk.get_statistics(trunks)
-    logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
-    statistics = trunk_stats['statistics']
-    ts = trunk_stats['time_stamp']
-    if remote_ts:
-        logging.info("Calculating epoch time from remote timestamp...")
-        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                               ts['hour'], ts['minute'], ts['second'], tz)
-        logging.debug("Remote timestamp is %s." % now)
-    else:
-        now = timestamp_local()
-        logging.debug("Local timestamp is %s." % now)
-    for x in statistics:
-        trunk_name = x['trunk_name'].replace('.', '-')
-        for y in x['statistics']:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.trunk.%s.%s" % (prefix, trunk_name, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
+    if trunks:
+        logging.info("Retrieving trunk statistics...")
+        trunk_stats = b.Networking.Trunk.get_statistics(trunks)
+        logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
+        statistics = trunk_stats['statistics']
+        ts = trunk_stats['time_stamp']
+        if remote_ts:
+            logging.info("Calculating epoch time from remote timestamp...")
+            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                   ts['hour'], ts['minute'], ts['second'], tz)
+            logging.debug("Remote timestamp is %s." % now)
+        else:
+            now = timestamp_local()
+            logging.debug("Local timestamp is %s." % now)
+        for x in statistics:
+            trunk_name = x['trunk_name'].replace('.', '-')
+            for y in x['statistics']:
+                stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                high = y['value']['high']
+                low = y['value']['low']
+                stat_val = convert_to_64_bit(high, low)
+                stat_path = "%s.trunk.%s.%s" % (prefix, trunk_name, stat_name)
+                metric = (stat_path, (now, stat_val))
+                logging.debug("metric = %s" % str(metric))
+                metric_list.append(metric)
 
     # CPU
 
