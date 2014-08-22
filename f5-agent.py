@@ -1,21 +1,20 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
 # 9/25/2013
 
+import argparse
 import bigsuds
-import getpass
 import json
 import logging
-import optparse
 import sys
 import time
 from carbonita import timestamp_local, send_metrics
 from datetime import tzinfo, timedelta, datetime
 from pprint import pformat
 
-VERSION="1.33"
+__VERSION__ = "1.4"
 
 # list of pool statistics to monitor
 
@@ -81,6 +80,62 @@ CLIENT_SSL_STATISTICS = ['ssl_five_min_avg_tot_conns',
 
 HOST_STATISTICS = ['memory_total_bytes',
                    'memory_used_bytes']
+
+def get_parser():
+    """Generates an argparse parser.
+
+    Returns:
+        An instantiated argparse parser object.
+    """
+    parser = argparse.ArgumentParser(description="F5 BIG-IP graphite agent",
+                                     fromfile_prefix_chars='@')
+    log_group = parser.add_argument_group('logging')
+    log_group.add_argument('--log-level', '-l', help='Logging level',
+                           choices=('critical', 'error', 'warning', 'info',
+                                    'debug'),
+                           dest='loglevel',
+                           default='critical')
+    log_group.add_argument('--log-filename', '-o',
+                           help='Logging output filename',
+                           action='store', dest='logfile')
+    icontrol_group = parser.add_argument_group('icontrol')
+    icontrol_group.add_argument('--f5-username', '--f5-user', 
+                                help='Username for F5 iControl authentication',
+                                dest='f5_username', required=True)
+    icontrol_group.add_argument('--f5-password', '--f5-pass',
+                                help='Password for F5 iControl authentication',
+                                dest='f5_password', required=True)
+    icontrol_group.add_argument('--f5-host', help="F5 host", dest="f5_host",
+                                required=True)
+    carbon_group = parser.add_argument_group('carbon')
+    carbon_group.add_argument('--carbon-host', help="Carbon host",
+                              dest="carbon_host")
+    carbon_group.add_argument('-p', '--carbon-port', '--port',
+                              help="Carbon port [%(default)d]", type=int,
+                              dest='carbon_port', default=2004)
+    carbon_group.add_argument('-r', '--carbon-retries',
+                              help="Number of carbon server delivery " +
+                                   "attempts [%(default)d]", type=int,
+                              dest="carbon_retries", default=2)
+    carbon_group.add_argument('-i', '--carbon-interval',
+                              help="Interval between carbon delivery " +
+                                   "attempts [%(default)d]", type=int,
+                              dest="carbon_interval", default=30)
+    carbon_group.add_argument('-c', '--chunk-size',
+                              help='Carbon chunk size [%(default)d]',
+                              type=int, dest='chunk_size', default=500)
+    carbon_group.add_argument('--prefix',
+                              help="Metric name prefix [bigip.ltm_host]",
+                              dest="prefix")
+    carbon_group.add_argument('-t', '--timestamp',
+                              help="Timestamp authority (local | remote) " +
+                                   "[%(default)s]", dest="ts_auth",
+                              choices=['local', 'remote'], default="local")
+    carbon_group.add_argument('-s', '--skip-upload', '-d', '--dry-run',
+                              help="Skip metric upload step [%(default)s]",
+                              action="store_true", dest="skip_upload",
+                              default=False)
+    return parser
 
 
 class TZFixedOffset(tzinfo):
@@ -590,121 +645,75 @@ def write_json_metrics(metric_list, filename):
 
 
 def main():
-    p = optparse.OptionParser(version=VERSION,
-                              usage="usage: %prog [options] ltm_host carbon_host",
-                              description="F5 BIG-IP graphite agent")
-    p.add_option('--log-level', '-l',
-                 help='Logging level (critical | error | warning | info | debug) [%default]',
-                 choices=('critical', 'error', 'warning', 'info', 'debug'),
-                 dest='loglevel', default="info")
-    p.add_option('--log-filename', '-o', help='Logging output filename',
-                 dest='logfile')
-    p.add_option('-s', '--skip-upload', action="store_true", dest="skip_upload",
-                 default=False, help="Skip metric upload step [%default]")
-    p.add_option('-u', '--user', help='Username and password for iControl authentication', dest='user')
-    p.add_option('-p', '--port', help="Carbon port [%default]", type="int", dest='carbon_port', default=2004)
-    p.add_option('-r', '--carbon-retries', help="Number of carbon server delivery attempts [%default]", type="int", dest="carbon_retries", default=2)
-    p.add_option('-i', '--carbon-interval', help="Interval between carbon delivery attempts [%default]", type="int", dest="carbon_interval", default=30)
-    p.add_option('-c', '--chunk-size', help='Carbon chunk size [%default]', type="int", dest='chunk_size', default=500)
-    p.add_option('-t', '--timestamp', help='Timestamp authority (local | remote) [%default]', type="choice", dest="ts_auth", choices=['local', 'remote'], default="local")
-    p.add_option('--prefix', help="Metric name prefix [bigip.ltm_host]", dest="prefix")
-
-    options, arguments = p.parse_args()
-
-    # right number of arguments?
-    if len(arguments) != 2:
-        p.error("wrong number of arguments: ltm_host and carbon_host required")
+    parser = get_parser()
+    args = parser.parse_args()
 
     LOGGING_LEVELS = {'critical': logging.CRITICAL,
                       'error': logging.ERROR,
                       'warning': logging.WARNING,
                       'info': logging.INFO,
                       'debug': logging.DEBUG}
-    loglevel = LOGGING_LEVELS.get(options.loglevel, logging.NOTSET)
-    logging.basicConfig(level=loglevel, filename=options.logfile,
-                        format='%(asctime)s %(levelname)s: %(message)s',
+    loglevel = LOGGING_LEVELS.get(args.loglevel, logging.NOTSET)
+    logging.basicConfig(level=loglevel, filename=args.logfile,
+                        format='%(asctime)s %(levelname)s: [%(thread)d ' +
+                        '%(module)s:%(funcName)s %(lineno)d] %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S')
     logging.getLogger('suds').setLevel(logging.CRITICAL)
+    logging.debug("args = %s" % args)
 
-    skip_upload = options.skip_upload
-    logging.debug("skip_upload = %s" % skip_upload)
-    chunk_size = options.chunk_size
-    logging.debug("chunk_size = %s" % chunk_size)
-    carbon_port = options.carbon_port
-    logging.debug("carbon_port = %s" % carbon_port)
-    carbon_retries = options.carbon_retries
-    logging.debug("carbon_retries = %s" % carbon_retries)
-    carbon_interval = options.carbon_interval
-    logging.debug("carbon_interval = %s" % carbon_interval)
-    ts_auth = options.ts_auth.strip().lower()
-    if ts_auth == "remote":
+    if args.ts_auth.strip().lower() == "remote":
         remote_ts = True
     else:
         remote_ts = False
-    logging.debug("timestamp_auth = %s" % ts_auth)
-    logging.debug("remote_ts = %s" % remote_ts)
 
-    if (not options.user) or (len(options.user) < 1):
-        # empty or non-existent --user option
-        # need to gather user and password
-        user = raw_input("Enter username:")
-        password = getpass.getpass("Enter password for user '%s':" % user)
-    elif ":" in options.user:
-        # --user option present with user and password
-        user, password = options.user.split(':', 1)
+    if args.prefix:
+        prefix = args.prefix.strip()
     else:
-        # --user option present with no password
-        user = options.user
-        password = getpass.getpass("Enter password for user '%s':" % user)
-    logging.debug("user = %s" % user)
-    logging.debug("password = %s" % password)
-
-    ltm_host = arguments[0]
-    logging.debug("ltm_host = %s" % ltm_host)
-
-    if options.prefix:
-        prefix = options.prefix.strip()
-    else:
-        scrubbed_ltm_host = ltm_host.replace(".", "_")
-        logging.debug("scrubbed_ltm_host = %s" % scrubbed_ltm_host)
-        prefix = "bigip.%s" % scrubbed_ltm_host
+        scrubbed_f5_host = args.f5_host.replace(".", "_")
+        logging.debug("scrubbed_f5_host = %s" % scrubbed_f5_host)
+        prefix = "bigip.%s" % scrubbed_f5_host
         logging.debug("prefix = %s" % prefix)
-
-    carbon_host = arguments[1]
-    logging.debug("carbon_host = %s" % carbon_host)
 
     start_timestamp = timestamp_local()
     logging.debug("start_timestamp = %s" % start_timestamp)
 
-    metric_list = gather_f5_metrics(ltm_host, user, password, prefix, remote_ts)
+    metric_list = gather_f5_metrics(args.f5_host, args.f5_username,
+                                    args.f5_password, prefix, remote_ts)
 
-    if not skip_upload:
+    if not args.skip_upload and args.carbon_host:
         upload_attempts = 0
         upload_success = False
-        max_attempts = carbon_retries + 1
+        max_attempts = args.carbon_retries + 1
         while not upload_success and (upload_attempts < max_attempts):
             upload_attempts += 1
-            logging.info("Uploading metrics (try #%d/%d)..." % (upload_attempts, max_attempts))
+            logging.info("Uploading metrics (try #%d/%d)..." %
+                         (upload_attempts, max_attempts))
             try:
-                send_metrics(carbon_host, carbon_port, metric_list, chunk_size)
+                send_metrics(args.carbon_host, args.carbon_port, metric_list,
+                             args.chunk_size)
             except Exception, detail:
                 logging.error("Unable to upload metrics.")
                 logging.debug(Exception)
                 logging.debug(detail)
                 upload_success = False
                 if upload_attempts < max_attempts:  # don't sleep on last run
-                    logging.info("Sleeping %d seconds before retry..." % carbon_interval)
-                    time.sleep(carbon_interval)
+                    logging.info("Sleeping %d seconds before retry..." %
+                                 args.carbon_interval)
+                    time.sleep(args.carbon_interval)
             else:
                 upload_success = True
         if not upload_success:
-            logging.error("Unable to upload metrics after %d attempts." % upload_attempts)
-            logging.info("Saving collected data to local disk for later replay...")
+            logging.error("Unable to upload metrics after %d attempts." %
+                          upload_attempts)
+            logging.info("Saving collected data to local disk for later " +
+                         "replay...")
             date_str = datetime.now().strftime("%Y%m%dT%H%M%S")
             logging.debug("date_str = %s" % date_str)
-            write_json_metrics(metric_list, "%s_%s_fail.json" % (prefix, date_str))
+            write_json_metrics(metric_list, "%s_%s_fail.json" %
+                               (prefix, date_str))
     else:
-        logging.info("Skipping upload step.")
+        logging.info("Dry-run or no carbon host provided -- skipping " +
+                     "upload step.")
 
     finish_timestamp = timestamp_local()
     logging.debug("finish_timestamp = %s" % finish_timestamp)
