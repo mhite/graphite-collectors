@@ -2,7 +2,6 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 9/25/2013
 
 import argparse
 import bigsuds
