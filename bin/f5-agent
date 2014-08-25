@@ -1,0 +1,5 @@
+#!/usr/bin/python
+
+from graphitecollectors.f5 import main
+
+main()

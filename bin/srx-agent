@@ -1,0 +1,5 @@
+#!/usr/bin/python
+
+from graphitecollectors.srx import main
+
+main()
