@@ -5,76 +5,19 @@
 
 import argparse
 import bigsuds
+import httplib
 import json
 import logging
 import sys
 import time
+import traceback
 from carbonita import timestamp_local, send_metrics
 from datetime import tzinfo, timedelta, datetime
+from fnmatch import fnmatchcase
 from pprint import pformat
 
-__VERSION__ = "1.5"
+__VERSION__ = "1.81"
 
-# list of pool statistics to monitor
-
-POOL_STATISTICS = ['current_sessions',
-                   'server_side_bytes_in',
-                   'server_side_bytes_out',
-                   'server_side_current_connections',
-                   'server_side_packets_in',
-                   'server_side_packets_out',
-                   'server_side_total_connections',
-                   'total_requests']
-
-# list of virtual server statistics to monitor
-# syn cookie statistics for virtual servers available
-# in 11.4+
-
-VS_STATISTICS = ['client_side_bytes_in',
-                 'client_side_bytes_out',
-                 'client_side_current_connections',
-                 'client_side_packets_in',
-                 'client_side_packets_out',
-                 'client_side_total_connections',
-                 'mean_connection_duration',
-                 'total_requests',
-                 'virtual_server_five_min_avg_cpu_usage',
-                 'virtual_server_syncookie_hw_instances',
-                 'virtual_server_syncookie_sw_instances',
-                 'virtual_server_syncookie_cache_usage',
-                 'virtual_server_syncookie_cache_overflows',
-                 'virtual_server_syncookie_sw_total',
-                 'virtual_server_syncookie_sw_accepts',
-                 'virtual_server_syncookie_sw_rejects',
-                 'virtual_server_syncookie_hw_total',
-                 'virtual_server_syncookie_hw_accepts']
-
-# SSL
-
-CLIENT_SSL_STATISTICS = ['ssl_five_min_avg_tot_conns',
-                         'ssl_five_sec_avg_tot_conns',
-                         'ssl_one_min_avg_tot_conns',
-                         'ssl_common_total_native_connections',
-                         'ssl_common_total_compatible_mode_connections',
-                         'ssl_cipher_adh_key_exchange',
-                         'ssl_cipher_dh_rsa_key_exchange',
-                         'ssl_cipher_edh_rsa_key_exchange',
-                         'ssl_cipher_rsa_key_exchange',
-                         'ssl_cipher_ecdhe_rsa_key_exchange',
-                         'ssl_cipher_null_bulk',
-                         'ssl_cipher_aes_bulk',
-                         'ssl_cipher_des_bulk',
-                         'ssl_cipher_idea_bulk',
-                         'ssl_cipher_rc2_bulk',
-                         'ssl_cipher_rc4_bulk',
-                         'ssl_cipher_null_digest',
-                         'ssl_cipher_md5_digest',
-                         'ssl_cipher_sha_digest']
-
-# Host
-
-HOST_STATISTICS = ['memory_total_bytes',
-                   'memory_used_bytes']
 
 def get_parser():
     """Generates an argparse parser.
@@ -95,7 +38,7 @@ def get_parser():
                            help='Logging output filename',
                            action='store', dest='logfile')
     icontrol_group = parser.add_argument_group('icontrol')
-    icontrol_group.add_argument('--f5-username', '--f5-user', 
+    icontrol_group.add_argument('--f5-username', '--f5-user',
                                 help='Username for F5 iControl authentication',
                                 dest='f5_username', required=True)
     icontrol_group.add_argument('--f5-password', '--f5-pass',
@@ -103,6 +46,13 @@ def get_parser():
                                 dest='f5_password', required=True)
     icontrol_group.add_argument('--f5-host', help="F5 host", dest="f5_host",
                                 required=True)
+    icontrol_group.add_argument('--f5-retries', help="Number of F5 iControl " +
+                                "metric collection attempts [%(default)d]",
+                                type=int, dest="f5_retries", default=2)
+    icontrol_group.add_argument('--f5-interval', help="Interval between F5 " +
+                                "iControl metric collection retry attempts " +
+                                "[%(default)d]", type=int, dest="f5_interval",
+                                default=5)
     carbon_group = parser.add_argument_group('carbon')
     carbon_group.add_argument('--carbon-host', help="Carbon host",
                               dest="carbon_host")
@@ -132,10 +82,8 @@ def get_parser():
                               action="store_true", dest="skip_upload",
                               default=False)
     metric_group = parser.add_argument_group('metric')
-    metric_group.add_argument('--interfaces',
-                              help="Limit interface metrics to list",
-                              dest="interfaces",
-                              nargs="*")
+    metric_group.add_argument('--exclude', action="append", dest="exclude",
+                              metavar="PATTERN")
     metric_group.add_argument('--no-ip', action="store_true", dest="no_ip")
     metric_group.add_argument('--no-ipv6', action="store_true",dest="no_ipv6")
     metric_group.add_argument('--no-icmp', action="store_true", dest="no_icmp")
@@ -160,6 +108,20 @@ def get_parser():
     metric_group.add_argument('--no-virtual-server', action="store_true",
                               dest="no_virtual_server")
     metric_group.add_argument('--no-pool', action="store_true", dest="no_pool")
+    metric_group.add_argument('--no-pool-member', action="store_true",
+                              dest="no_pool_member")
+    metric_group.add_argument('--no-irule', action="store_true",
+                              dest="no_irule")
+    metric_group.add_argument('--no-http', action="store_true",
+                              dest="no_http")
+    metric_group.add_argument('--no-oneconnect', action="store_true",
+                              dest="no_oneconnect")
+    metric_group.add_argument('--no-temperature', action="store_true",
+                              dest="no_temperature")
+    metric_group.add_argument('--no-fan', action="store_true", dest="no_fan")
+    metric_group.add_argument('--no-device-group', action="store_true",
+                              dest="no_device_group")
+    metric_group.add_argument('--no-node', action="store_true", dest="no_node")
     return parser
 
 
@@ -204,512 +166,799 @@ def convert_to_epoch(year, month, day, hour, minute, second, tz):
     return(epoch)
 
 
-def gather_f5_metrics(ltm_host, user, password, prefix, remote_ts,
-                      interface_limit, no_ip, no_ipv6, no_icmp,
-                      no_icmpv6, no_tcp, no_tmm, no_client_ssl,
-                      no_interface, no_trunk, no_cpu, no_host, no_snat_pool,
-                      no_snat_translation, no_virtual_server, no_pool):
+def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
+                      remote_ts, no_ip, no_ipv6, no_icmp, no_icmpv6, no_tcp,
+                      no_tmm, no_client_ssl, no_interface, no_trunk, no_cpu,
+                      no_host, no_snat_pool, no_snat_translation,
+                      no_virtual_server, no_pool, no_pool_member, no_irule,
+                      no_http, no_oneconnect, no_temperature, no_fan,
+                      no_device_group, no_node):
     """ Connects to an F5 via iControl and pulls statistics.
     """
-    metric_list = []
-    try:
-        logging.info("Connecting to BIG-IP and pulling statistics...")
-        b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
-        logging.info("Requesting session...")
-        b = b.with_session_id()
-    except bigsuds.ConnectionError, detail:
-        logging.critical("Unable to connect to BIG-IP. Details: %s" % pformat(detail))
-        sys.exit(1)
-    logging.info("Retrieving time zone information...")
-    time_zone = b.System.SystemInfo.get_time_zone()
-    logging.debug("time_zone = %s" % pformat(time_zone))
-    tz = TZFixedOffset(offset=(time_zone['gmt_offset'] * 60), name=time_zone['time_zone'])
-    logging.info("Remote time zone is \"%s\"." % time_zone['time_zone'])
-    logging.info("Setting recursive query state to enabled...")
-    b.System.Session.set_recursive_query_state(state='STATE_ENABLED')
-    logging.info("Switching active folder to root...")
-    b.System.Session.set_active_folder(folder="/")
+    last_detail = None
+    upload_attempts = 0
+    upload_success = False
+    max_attempts = retries + 1
+    while not upload_success and (upload_attempts < max_attempts):
+        metric_list = []
+        upload_attempts += 1
+        try:
+            logging.info("Connecting to BIG-IP and pulling statistics " +
+                         "(try #%d/%d)..." % (upload_attempts, max_attempts))
+            b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
+            logging.info("Requesting session...")
+            b = b.with_session_id()
+            logging.info("Retrieving time zone information...")
+            time_zone = b.System.SystemInfo.get_time_zone()
+            logging.debug("time_zone = %s" % pformat(time_zone))
+            tz = TZFixedOffset(offset=(time_zone['gmt_offset'] * 60), name=time_zone['time_zone'])
+            logging.info("Remote time zone is \"%s\"." % time_zone['time_zone'])
+            logging.info("Setting recursive query state to enabled...")
+            b.System.Session.set_recursive_query_state(state='STATE_ENABLED')
+            logging.info("Switching active folder to root...")
+            b.System.Session.set_active_folder(folder="/")
 
-    # IP
+            # IP
 
-    if not no_ip:
-        logging.info("Retrieving global IP statistics...")
-        ip_stats = b.System.Statistics.get_ip_statistics()
-        logging.debug("ip_stats =\n%s" % pformat(ip_stats))
-        statistics = ip_stats['statistics']
-        ts = ip_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.protocol.ip.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping IP...")
-
-    # IPv6
-
-    if not no_ipv6:
-        logging.info("Retrieving global IPv6 statistics...")
-        ipv6_stats = b.System.Statistics.get_ipv6_statistics()
-        logging.debug("ipv6_stats =\n%s" % pformat(ipv6_stats))
-        statistics = ipv6_stats['statistics']
-        ts = ipv6_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.protocol.ipv6.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping IPv6...")
-
-    # ICMP
-
-    if not no_icmp:
-        logging.info("Retrieving global ICMP statistics...")
-        icmp_stats = b.System.Statistics.get_icmp_statistics()
-        logging.debug("icmp_stats =\n%s" % pformat(icmp_stats))
-        statistics = icmp_stats['statistics']
-        ts = icmp_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.protocol.icmp.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping ICMP...")
-
-    # ICMPv6
-
-    if not no_icmpv6:
-        logging.info("Retrieving global ICMPv6 statistics...")
-        icmpv6_stats = b.System.Statistics.get_icmpv6_statistics()
-        logging.debug("icmpv6_stats =\n%s" % pformat(icmpv6_stats))
-        statistics = icmpv6_stats['statistics']
-        ts = icmpv6_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.protocol.icmpv6.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping ICMPv6...")
-
-    # TCP
-
-    if not no_tcp:
-        logging.info("Retrieving TCP statistics...")
-        tcp_stats = b.System.Statistics.get_tcp_statistics()
-        logging.debug("tcp_stats =\n%s" % pformat(tcp_stats))
-        statistics = tcp_stats['statistics']
-        ts = tcp_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.protocol.tcp.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping TCP...")
-
-    # Global TMM
-
-    if not no_tmm:
-        logging.info("Retrieving global TMM statistics...")
-        global_tmm_stats = b.System.Statistics.get_global_tmm_statistics()
-        logging.debug("global_tmm_stats =\n%s" % pformat(global_tmm_stats))
-        statistics = global_tmm_stats['statistics']
-        ts = global_tmm_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            high = y['value']['high']
-            low = y['value']['low']
-            stat_val = convert_to_64_bit(high, low)
-            stat_path = "%s.tmm.global.%s" % (prefix, stat_name)
-            metric = (stat_path, (now, stat_val))
-            logging.debug("metric = %s" % str(metric))
-            metric_list.append(metric)
-    else:
-        logging.debug("Skipping TMM...")
-
-    # Client SSL
-
-    if not no_client_ssl:
-        logging.info("Retrieving client SSL statistics...")
-        client_ssl_stats = b.System.Statistics.get_client_ssl_statistics()
-        logging.debug("client_ssl_stats =\n%s" % pformat(client_ssl_stats))
-        statistics = client_ssl_stats['statistics']
-        ts = client_ssl_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for y in statistics:
-            stat_name = y['type'].split("STATISTIC_")[-1].lower()
-            if stat_name in CLIENT_SSL_STATISTICS:
-                high = y['value']['high']
-                low = y['value']['low']
-                stat_val = convert_to_64_bit(high, low)
-                stat_path = "%s.client_ssl.%s" % (prefix, stat_name)
-                metric = (stat_path, (now, stat_val))
-                logging.debug("metric = %s" % str(metric))
-                metric_list.append(metric)
-    else:
-        logging.debug("Skipping client SSL...")
-
-    # Interfaces
-
-    if not no_interface:
-        logging.info("Retrieving list of interfaces...")
-        interfaces = b.Networking.Interfaces.get_list()
-        logging.debug("interfaces = %s" % pformat(interfaces))
-        if interface_limit:
-            logging.debug("filtering interfaces with interface_limit list...")
-            interfaces = list(set(interface_limit) & set(interfaces))
-            logging.debug("interfaces = %s" % pformat(interfaces))
-        if interfaces:
-            logging.info("Retrieving interface statistics...")
-            int_stats = b.Networking.Interfaces.get_statistics(interfaces)
-            logging.debug("int_stats =\n%s" % pformat(int_stats))
-            statistics = int_stats['statistics']
-            ts = int_stats['time_stamp']
-            if remote_ts:
-                logging.info("Calculating epoch time from remote timestamp...")
-                now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                       ts['hour'], ts['minute'], ts['second'], tz)
-                logging.debug("Remote timestamp is %s." % now)
+            if not no_ip:
+                logging.info("Retrieving global IP statistics...")
+                ip_stats = b.System.Statistics.get_ip_statistics()
+                logging.debug("ip_stats =\n%s" % pformat(ip_stats))
+                statistics = ip_stats['statistics']
+                ts = ip_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
+                    stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                    high = y['value']['high']
+                    low = y['value']['low']
+                    stat_val = convert_to_64_bit(high, low)
+                    stat_path = "%s.protocol.ip.%s" % (prefix, stat_name)
+                    metric = (stat_path, (now, stat_val))
+                    logging.debug("metric = %s" % str(metric))
+                    metric_list.append(metric)
             else:
-                now = timestamp_local()
-                logging.debug("Local timestamp is %s." % now)
-            for x in statistics:
-                int_name = x['interface_name'].replace('.', '-')
-                for y in x['statistics']:
+                logging.debug("Skipping IP...")
+
+            # IPv6
+
+            if not no_ipv6:
+                logging.info("Retrieving global IPv6 statistics...")
+                ipv6_stats = b.System.Statistics.get_ipv6_statistics()
+                logging.debug("ipv6_stats =\n%s" % pformat(ipv6_stats))
+                statistics = ipv6_stats['statistics']
+                ts = ipv6_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
                     stat_name = y['type'].split("STATISTIC_")[-1].lower()
                     high = y['value']['high']
                     low = y['value']['low']
                     stat_val = convert_to_64_bit(high, low)
-                    stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                    stat_path = "%s.protocol.ipv6.%s" % (prefix, stat_name)
                     metric = (stat_path, (now, stat_val))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-    else:
-        logging.debug("Skipping interfaces...")
-
-    # Trunk
-
-    if not no_trunk:
-        logging.info("Retrieving list of trunks...")
-        trunks = b.Networking.Trunk.get_list()
-        logging.debug("trunks =\n%s" % pformat(trunks))
-        if trunks:
-            logging.info("Retrieving trunk statistics...")
-            trunk_stats = b.Networking.Trunk.get_statistics(trunks)
-            logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
-            statistics = trunk_stats['statistics']
-            ts = trunk_stats['time_stamp']
-            if remote_ts:
-                logging.info("Calculating epoch time from remote timestamp...")
-                now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                       ts['hour'], ts['minute'], ts['second'], tz)
-                logging.debug("Remote timestamp is %s." % now)
             else:
-                now = timestamp_local()
-                logging.debug("Local timestamp is %s." % now)
-            for x in statistics:
-                trunk_name = x['trunk_name'].replace('.', '-')
-                for y in x['statistics']:
+                logging.debug("Skipping IPv6...")
+
+            # ICMP
+
+            if not no_icmp:
+                logging.info("Retrieving global ICMP statistics...")
+                icmp_stats = b.System.Statistics.get_icmp_statistics()
+                logging.debug("icmp_stats =\n%s" % pformat(icmp_stats))
+                statistics = icmp_stats['statistics']
+                ts = icmp_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
                     stat_name = y['type'].split("STATISTIC_")[-1].lower()
                     high = y['value']['high']
                     low = y['value']['low']
                     stat_val = convert_to_64_bit(high, low)
-                    stat_path = "%s.trunk.%s.%s" % (prefix, trunk_name, stat_name)
+                    stat_path = "%s.protocol.icmp.%s" % (prefix, stat_name)
                     metric = (stat_path, (now, stat_val))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-    else:
-        logging.debug("Skipping trunks...")
+            else:
+                logging.debug("Skipping ICMP...")
 
-    # CPU
+            # ICMPv6
 
-    if not no_cpu:
-        logging.info("Retrieving CPU statistics...")
-        cpu_stats = b.System.SystemInfo.get_all_cpu_usage_extended_information()
-        logging.debug("cpu_stats =\n%s" % pformat(cpu_stats))
-        statistics = cpu_stats['hosts']
-        ts = cpu_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            host_id = x['host_id'].replace('.', '-')
-            for cpu_num, cpu_stat in enumerate(x['statistics']):
-                for y in cpu_stat:
+            if not no_icmpv6:
+                logging.info("Retrieving global ICMPv6 statistics...")
+                icmpv6_stats = b.System.Statistics.get_icmpv6_statistics()
+                logging.debug("icmpv6_stats =\n%s" % pformat(icmpv6_stats))
+                statistics = icmpv6_stats['statistics']
+                ts = icmpv6_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
                     stat_name = y['type'].split("STATISTIC_")[-1].lower()
                     high = y['value']['high']
                     low = y['value']['low']
                     stat_val = convert_to_64_bit(high, low)
-                    stat_path = "%s.cpu.%s.cpu%s.%s" % (prefix, host_id, cpu_num, stat_name)
+                    stat_path = "%s.protocol.icmpv6.%s" % (prefix, stat_name)
                     metric = (stat_path, (now, stat_val))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-    else:
-        logging.debug("Skipping CPU...")
+            else:
+                logging.debug("Skipping ICMPv6...")
 
-    # Host
+            # TCP
 
-    if not no_host:
-        logging.info("Retrieving host statistics...")
-        host_stats = b.System.Statistics.get_all_host_statistics()
-        logging.debug("host_stats =\n%s" % pformat(host_stats))
-        statistics = host_stats['statistics']
-        ts = host_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            host_id = x['host_id'].replace('.', '-')
-            for y in x['statistics']:
-                stat_name = y['type'].split("STATISTIC_")[-1].lower()
-                if stat_name in HOST_STATISTICS:
+            if not no_tcp:
+                logging.info("Retrieving TCP statistics...")
+                tcp_stats = b.System.Statistics.get_tcp_statistics()
+                logging.debug("tcp_stats =\n%s" % pformat(tcp_stats))
+                statistics = tcp_stats['statistics']
+                ts = tcp_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
+                    stat_name = y['type'].split("STATISTIC_")[-1].lower()
                     high = y['value']['high']
                     low = y['value']['low']
                     stat_val = convert_to_64_bit(high, low)
-                    if stat_name.startswith("memory_"):
-                        # throw memory stats into dedicated memory section
-                        stat_path = "%s.memory.%s.%s" % (prefix, host_id, stat_name)
+                    stat_path = "%s.protocol.tcp.%s" % (prefix, stat_name)
+                    metric = (stat_path, (now, stat_val))
+                    logging.debug("metric = %s" % str(metric))
+                    metric_list.append(metric)
+            else:
+                logging.debug("Skipping TCP...")
+
+            # Global TMM
+
+            if not no_tmm:
+                logging.info("Retrieving global TMM statistics...")
+                global_tmm_stats = b.System.Statistics.get_global_tmm_statistics()
+                logging.debug("global_tmm_stats =\n%s" % pformat(global_tmm_stats))
+                statistics = global_tmm_stats['statistics']
+                ts = global_tmm_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
+                    stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                    high = y['value']['high']
+                    low = y['value']['low']
+                    stat_val = convert_to_64_bit(high, low)
+                    stat_path = "%s.tmm.global.%s" % (prefix, stat_name)
+                    metric = (stat_path, (now, stat_val))
+                    logging.debug("metric = %s" % str(metric))
+                    metric_list.append(metric)
+            else:
+                logging.debug("Skipping TMM...")
+
+            # Client SSL
+
+            if not no_client_ssl:
+                logging.info("Retrieving client SSL statistics...")
+                client_ssl_stats = b.System.Statistics.get_client_ssl_statistics()
+                logging.debug("client_ssl_stats =\n%s" % pformat(client_ssl_stats))
+                statistics = client_ssl_stats['statistics']
+                ts = client_ssl_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for y in statistics:
+                    stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                    high = y['value']['high']
+                    low = y['value']['low']
+                    stat_val = convert_to_64_bit(high, low)
+                    stat_path = "%s.client_ssl.%s" % (prefix, stat_name)
+                    metric = (stat_path, (now, stat_val))
+                    logging.debug("metric = %s" % str(metric))
+                    metric_list.append(metric)
+            else:
+                logging.debug("Skipping client SSL...")
+
+            # Interfaces
+
+            if not no_interface:
+                logging.info("Retrieving list of interfaces...")
+                interfaces = b.Networking.Interfaces.get_list()
+                logging.debug("interfaces = %s" % pformat(interfaces))
+                if interfaces:
+                    logging.info("Retrieving interface statistics...")
+                    int_stats = b.Networking.Interfaces.get_statistics(interfaces)
+                    logging.debug("int_stats =\n%s" % pformat(int_stats))
+                    statistics = int_stats['statistics']
+                    ts = int_stats['time_stamp']
+                    if remote_ts:
+                        logging.info("Calculating epoch time from remote timestamp...")
+                        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                               ts['hour'], ts['minute'], ts['second'], tz)
+                        logging.debug("Remote timestamp is %s." % now)
                     else:
-                        # catch-all
-                        stat_path = "%s.system.host.%s.%s" % (prefix, host_id, stat_name)
-                    metric = (stat_path, (now, stat_val))
+                        now = timestamp_local()
+                        logging.debug("Local timestamp is %s." % now)
+                    for x in statistics:
+                        int_name = x['interface_name'].replace('.', '-')
+                        for y in x['statistics']:
+                            stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                            high = y['value']['high']
+                            low = y['value']['low']
+                            stat_val = convert_to_64_bit(high, low)
+                            stat_path = "%s.interface.%s.%s" % (prefix, int_name, stat_name)
+                            metric = (stat_path, (now, stat_val))
+                            logging.debug("metric = %s" % str(metric))
+                            metric_list.append(metric)
+            else:
+                logging.debug("Skipping interfaces...")
+
+            # Trunk
+
+            if not no_trunk:
+                logging.info("Retrieving list of trunks...")
+                trunks = b.Networking.Trunk.get_list()
+                logging.debug("trunks =\n%s" % pformat(trunks))
+                if trunks:
+                    logging.info("Retrieving trunk statistics...")
+                    trunk_stats = b.Networking.Trunk.get_statistics(trunks)
+                    logging.debug("trunk_stats =\n%s" % pformat(trunk_stats))
+                    statistics = trunk_stats['statistics']
+                    ts = trunk_stats['time_stamp']
+                    if remote_ts:
+                        logging.info("Calculating epoch time from remote timestamp...")
+                        now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                               ts['hour'], ts['minute'], ts['second'], tz)
+                        logging.debug("Remote timestamp is %s." % now)
+                    else:
+                        now = timestamp_local()
+                        logging.debug("Local timestamp is %s." % now)
+                    for x in statistics:
+                        trunk_name = x['trunk_name'].replace('.', '-')
+                        for y in x['statistics']:
+                            stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                            high = y['value']['high']
+                            low = y['value']['low']
+                            stat_val = convert_to_64_bit(high, low)
+                            stat_path = "%s.trunk.%s.%s" % (prefix, trunk_name, stat_name)
+                            metric = (stat_path, (now, stat_val))
+                            logging.debug("metric = %s" % str(metric))
+                            metric_list.append(metric)
+            else:
+                logging.debug("Skipping trunks...")
+
+            # CPU
+
+            if not no_cpu:
+                logging.info("Retrieving CPU statistics...")
+                cpu_stats = b.System.SystemInfo.get_all_cpu_usage_extended_information()
+                logging.debug("cpu_stats =\n%s" % pformat(cpu_stats))
+                statistics = cpu_stats['hosts']
+                ts = cpu_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    host_id = x['host_id'].replace('.', '-')
+                    for cpu_num, cpu_stat in enumerate(x['statistics']):
+                        for y in cpu_stat:
+                            stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                            high = y['value']['high']
+                            low = y['value']['low']
+                            stat_val = convert_to_64_bit(high, low)
+                            stat_path = "%s.cpu.%s.cpu%s.%s" % (prefix, host_id, cpu_num, stat_name)
+                            metric = (stat_path, (now, stat_val))
+                            logging.debug("metric = %s" % str(metric))
+                            metric_list.append(metric)
+            else:
+                logging.debug("Skipping CPU...")
+
+            # Host
+
+            if not no_host:
+                logging.info("Retrieving host statistics...")
+                host_stats = b.System.Statistics.get_all_host_statistics()
+                logging.debug("host_stats =\n%s" % pformat(host_stats))
+                statistics = host_stats['statistics']
+                ts = host_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    host_id = x['host_id'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        if stat_name.startswith("memory_"):
+                            # throw memory stats into dedicated memory section
+                            stat_path = "%s.memory.%s.%s" % (prefix, host_id, stat_name)
+                        else:
+                            # catch-all
+                            stat_path = "%s.system.host.%s.%s" % (prefix, host_id, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping host statistics...")
+
+            # SNAT Pool
+
+            if not no_snat_pool:
+                logging.info("Retrieving SNAT Pool statistics...")
+                snatpool_stats = b.LocalLB.SNATPool.get_all_statistics()
+                logging.debug("snatpool_stats = %s" % pformat(snatpool_stats))
+                statistics = snatpool_stats['statistics']
+                ts = snatpool_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    snat_pool = x['snat_pool'].replace(".", '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.snat_pool.%s.%s" % (prefix, snat_pool, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping SNAT pools...")
+
+            # SNAT Translations
+
+            if not no_snat_translation:
+                logging.info("Retrieving SNAT translation statistics...")
+                snattrans_stats = b.LocalLB.SNATTranslationAddressV2.get_all_statistics()
+                logging.debug("snattrans_stats = %s" % pformat(snattrans_stats))
+                statistics = snattrans_stats['statistics']
+                ts = snattrans_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    trans_addr = x['translation_address'].replace(".", '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.snat_translation.%s.%s" % (prefix, trans_addr, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping SNAT translations...")
+
+            # Virtual server
+
+            if not no_virtual_server:
+                logging.info("Retrieving statistics for all virtual servers...")
+                virt_stats = b.LocalLB.VirtualServer.get_all_statistics()
+                logging.debug("virt_stats =\n%s" % pformat(virt_stats))
+                statistics = virt_stats['statistics']
+                ts = virt_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    vs_name = x['virtual_server']['name'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.vs.%s.%s" % (prefix, vs_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping virtual servers...")
+
+            # Pool
+
+            if not no_pool:
+                logging.info("Retrieving statistics for all pools...")
+                pool_stats = b.LocalLB.Pool.get_all_statistics()
+                logging.debug("pool_stats =\n%s" % pformat(pool_stats))
+                statistics = pool_stats['statistics']
+                ts = pool_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    pool_name = x['pool_name'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.pool.%s.%s" % (prefix, pool_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                # Reuse previous timestamp (a.k.a. fake it!)
+                logging.info("Retrieving pool list...")
+                pool_list = b.LocalLB.Pool.get_list()
+                logging.debug("pool_list =\n%s" % pformat(pool_list))
+                if pool_list:
+                    logging.info("Retrieving active member count for all pools...")
+                    active_member_count = b.LocalLB.Pool.get_active_member_count(pool_names=pool_list)
+                    for pool_name, stat_val in zip(pool_list, active_member_count):
+                        stat_path = "%s.pool.%s.active_member_count" % (prefix, pool_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                    logging.info("Retrieving member count for all pools...")
+                    pool_members = b.LocalLB.Pool.get_member_v2(pool_names=pool_list)
+                    pool_member_count = [len(x) for x in pool_members]
+                    for pool_name, stat_val in zip(pool_list, pool_member_count):
+                        stat_path = "%s.pool.%s.member_count" % (prefix, pool_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                else:
+                    logging.info("Pool list is empty, skipping member count retrieval.")
+            else:
+                logging.debug("Skipping pools...")
+
+            # Pool members
+
+            if not no_pool_member:
+                logging.info("Retrieving pool list...")
+                pool_list = b.LocalLB.Pool.get_list()
+                logging.debug("pool_list =\n%s" % pformat(pool_list))
+                if pool_list:
+                    logging.info("Retrieving pool member statistics for all pools...")
+                    pool_member_stats = b.LocalLB.Pool.get_all_member_statistics(pool_names=pool_list)
+                    logging.debug("pool_member_stats =\n%s" % pformat(pool_member_stats))
+                    for pool_name, x in zip(pool_list, pool_member_stats):
+                        statistics = x['statistics']
+                        ts = x['time_stamp']
+                        if remote_ts:
+                            logging.info("Calculating epoch time from remote timestamp...")
+                            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                                   ts['hour'], ts['minute'], ts['second'], tz)
+                            logging.debug("Remote timestamp is %s." % now)
+                        else:
+                            now = timestamp_local()
+                            logging.debug("Local timestamp is %s." % now)
+                        for y in statistics:
+                            pool_member_name = y['member']['address'].replace('.', '-')
+                            pool_member_port = y['member']['port']
+                            logging.debug("y = %s" % y)
+                            for z in y['statistics']:
+                                stat_name = z['type'].split("STATISTIC_")[-1].lower()
+                                high = z['value']['high']
+                                low = z['value']['low']
+                                stat_val = convert_to_64_bit(high, low)
+                                stat_path = "%s.pool_member.%s.%s.%s.%s" % (prefix, pool_name, pool_member_name, pool_member_port, stat_name)
+                                metric = (stat_path, (now, stat_val))
+                                logging.debug("metric = %s" % str(metric))
+                                metric_list.append(metric)
+            else:
+                logging.debug("Skipping pool members...")
+
+            if not no_node:
+                logging.info("Retrieving node statistics...")
+                node_stats = b.LocalLB.NodeAddressV2.get_all_statistics()
+                logging.debug("node_stats =\n%s" % pformat(node_stats))
+                statistics = node_stats['statistics']
+                ts = node_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    node_name = x['node'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.node.%s.%s" % (prefix, node_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping node statistics...")
+
+            # iRule
+
+            if not no_irule:
+                logging.info("Retrieving statistics for all iRules...")
+                irule_stats = b.LocalLB.Rule.get_all_statistics()
+                logging.debug("irule_stats =\n%s" % pformat(irule_stats))
+                statistics = irule_stats['statistics']
+                ts = irule_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    irule_name = x['rule_name'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.irule.%s.%s" % (prefix, irule_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping iRules...")
+
+            # HTTP Profile
+
+            if not no_http:
+                logging.info("Retrieving HTTP profile statistics...")
+                http_stats = b.LocalLB.ProfileHttp.get_all_statistics()
+                logging.debug("http_stats = %s\n" % pformat(http_stats))
+                statistics = http_stats['statistics']
+                ts = http_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    profile_name = x['profile_name'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.http.%s.%s" % (prefix, profile_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping HTTP profile...")
+
+            # OneConnect
+
+            if not no_oneconnect:
+                logging.info("Retrieving OneConnect statistics...")
+                oneconnect_stats = b.LocalLB.ProfileOneConnect.get_all_statistics()
+                logging.debug("oneconnect_stats =\n%s" % pformat(oneconnect_stats))
+                statistics = oneconnect_stats['statistics']
+                ts = oneconnect_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in statistics:
+                    profile_name = x['profile_name'].replace('.', '-')
+                    for y in x['statistics']:
+                        stat_name = y['type'].split("STATISTIC_")[-1].lower()
+                        high = y['value']['high']
+                        low = y['value']['low']
+                        stat_val = convert_to_64_bit(high, low)
+                        stat_path = "%s.oneconnect.%s.%s" % (prefix, profile_name, stat_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping OneConnect...")
+
+            # Temperature
+
+            if not no_temperature:
+                logging.info("Retrieving temperature statistics...")
+                temperature_stats = b.System.SystemInfo.get_temperature_metrics()
+                logging.debug("temperature_stats =\n%s" % pformat(temperature_stats))
+                temperatures = temperature_stats['temperatures'][0]  # not sure why this is a list, maybe for viprion platform?
+                ts = temperature_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in temperature_stats['temperatures']:
+                    logging.debug("x = %s" % x)
+                    temperature_index = None
+                    temperature_value = None
+                    for y in x:
+                        if y['metric_type'] == 'TEMPERATURE_INDEX':
+                            temperature_index = y['value']
+                        elif y['metric_type'] == 'TEMPERATURE_VALUE':
+                            temperature_value = y['value']
+                    stat_path = "%s.temperature.%s.temperature_value" % (prefix, temperature_index)
+                    metric = (stat_path, (now, temperature_value))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-    else:
-        logging.debug("Skipping host statistics...")
+            else:
+                logging.debug("Skipping temperatures...")
 
-    # SNAT Pool
+            # Fan
 
-    if not no_snat_pool:
-        logging.info("Retrieving SNAT Pool statistics...")
-        snatpool_stats = b.LocalLB.SNATPool.get_all_statistics()
-        logging.debug("snatpool_stats = %s" % pformat(snatpool_stats))
-        statistics = snatpool_stats['statistics']
-        ts = snatpool_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            snat_pool = x['snat_pool'].replace(".", '-')
-            for y in x['statistics']:
-                stat_name = y['type'].split("STATISTIC_")[-1].lower()
-                high = y['value']['high']
-                low = y['value']['low']
-                stat_val = convert_to_64_bit(high, low)
-                stat_path = "%s.snat_pool.%s.%s" % (prefix, snat_pool, stat_name)
-                metric = (stat_path, (now, stat_val))
-                logging.debug("metric = %s" % str(metric))
-                metric_list.append(metric)
-    else:
-        logging.debug("Skipping SNAT pools...")
-
-    # SNAT Translations
-
-    if not no_snat_translation:
-        logging.info("Retrieving SNAT translation statistics...")
-        snattrans_stats = b.LocalLB.SNATTranslationAddressV2.get_all_statistics()
-        logging.debug("snattrans_stats = %s" % pformat(snattrans_stats))
-        statistics = snattrans_stats['statistics']
-        ts = snattrans_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            trans_addr = x['translation_address'].replace(".", '-')
-            for y in x['statistics']:
-                stat_name = y['type'].split("STATISTIC_")[-1].lower()
-                high = y['value']['high']
-                low = y['value']['low']
-                stat_val = convert_to_64_bit(high, low)
-                stat_path = "%s.snat_translation.%s.%s" % (prefix, trans_addr, stat_name)
-                metric = (stat_path, (now, stat_val))
-                logging.debug("metric = %s" % str(metric))
-                metric_list.append(metric)
-    else:
-        logging.debug("Skipping SNAT translations...")
-
-    # Virtual server
-
-    if not no_virtual_server:
-        logging.info("Retrieving statistics for all virtual servers...")
-        virt_stats = b.LocalLB.VirtualServer.get_all_statistics()
-        logging.debug("virt_stats =\n%s" % pformat(virt_stats))
-        statistics = virt_stats['statistics']
-        ts = virt_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            vs_name = x['virtual_server']['name'].replace('.', '-')
-            for y in x['statistics']:
-                stat_name = y['type'].split("STATISTIC_")[-1].lower()
-                if stat_name in VS_STATISTICS:
-                    high = y['value']['high']
-                    low = y['value']['low']
-                    stat_val = convert_to_64_bit(high, low)
-                    stat_path = "%s.vs.%s.%s" % (prefix, vs_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
+            if not no_fan:
+                logging.info("Retrieving fan statistics...")
+                fan_stats = b.System.SystemInfo.get_fan_metrics()
+                logging.debug("fan_stats =\n%s" % pformat(fan_stats))
+                ts = fan_stats['time_stamp']
+                if remote_ts:
+                    logging.info("Calculating epoch time from remote timestamp...")
+                    now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
+                                           ts['hour'], ts['minute'], ts['second'], tz)
+                    logging.debug("Remote timestamp is %s." % now)
+                else:
+                    now = timestamp_local()
+                    logging.debug("Local timestamp is %s." % now)
+                for x in fan_stats['fans']:
+                    logging.debug("x = %s" % x)
+                    fan_index = None
+                    fan_state = None
+                    fan_speed = None
+                    for y in x:
+                        if y['metric_type'] == 'FAN_INDEX':
+                            fan_index = y['value']
+                        elif y['metric_type'] == 'FAN_STATE':
+                            fan_state = y['value']
+                        elif y['metric_type'] == 'FAN_SPEED':
+                            fan_speed = y['value']
+                    stat_path = "%s.fan.%s.fan_state" % (prefix, fan_index)
+                    metric = (stat_path, (now, fan_state))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-    else:
-        logging.debug("Skipping virtual servers...")
-
-    # Pool
-
-    if not no_pool:
-        logging.info("Retrieving statistics for all pools...")
-        pool_stats = b.LocalLB.Pool.get_all_statistics()
-        logging.debug("pool_stats =\n%s" % pformat(pool_stats))
-        statistics = pool_stats['statistics']
-        ts = pool_stats['time_stamp']
-        if remote_ts:
-            logging.info("Calculating epoch time from remote timestamp...")
-            now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                   ts['hour'], ts['minute'], ts['second'], tz)
-            logging.debug("Remote timestamp is %s." % now)
-        else:
-            now = timestamp_local()
-            logging.debug("Local timestamp is %s." % now)
-        for x in statistics:
-            pool_name = x['pool_name'].replace('.', '-')
-            for y in x['statistics']:
-                stat_name = y['type'].split("STATISTIC_")[-1].lower()
-                if stat_name in POOL_STATISTICS:
-                    high = y['value']['high']
-                    low = y['value']['low']
-                    stat_val = convert_to_64_bit(high, low)
-                    stat_path = "%s.pool.%s.%s" % (prefix, pool_name, stat_name)
-                    metric = (stat_path, (now, stat_val))
+                    stat_path = "%s.fan.%s.fan_speed" % (prefix, fan_index)
+                    metric = (stat_path, (now, fan_speed))
                     logging.debug("metric = %s" % str(metric))
                     metric_list.append(metric)
-        # Reuse previous timestamp (a.k.a. fake it!)
-        logging.info("Retrieving pool list...")
-        pool_list = b.LocalLB.Pool.get_list()
-        logging.debug("pool_list =\n%s" % pformat(pool_list))
-        if pool_list:
-            logging.info("Retrieving active member count for all pools...")
-            active_member_count = b.LocalLB.Pool.get_active_member_count(pool_names=pool_list)
-            for pool_name, stat_val in zip(pool_list, active_member_count):
-                stat_path = "%s.pool.%s.active_member_count" % (prefix, pool_name)
-                metric = (stat_path, (now, stat_val))
-                logging.debug("metric = %s" % str(metric))
-                metric_list.append(metric)
-            logging.info("Retrieving member count for all pools...")
-            pool_members = b.LocalLB.Pool.get_member_v2(pool_names=pool_list)
-            pool_member_count = [len(x) for x in pool_members]
-            for pool_name, stat_val in zip(pool_list, pool_member_count):
-                stat_path = "%s.pool.%s.member_count" % (prefix, pool_name)
-                metric = (stat_path, (now, stat_val))
-                logging.debug("metric = %s" % str(metric))
-                metric_list.append(metric)
-        else:
-            logging.info("Pool list is empty, skipping member count retrieval.")
-    else:
-        logging.debug("Skipping pools...")
+            else:
+                logging.debug("Skipping fans...")
 
+            # Device Group
+
+            if not no_device_group:
+                color_lookup = {'COLOR_UNKNOWN': 0,
+                                'COLOR_GREEN': 1,
+                                'COLOR_YELLOW': 2,
+                                'COLOR_RED': 3,
+                                'COLOR_BLUE': 4,
+                                'COLOR_GRAY': 5,
+                                'COLOR_BLACK': 6}
+
+                sync_lookup = {'MEMBER_STATE_UNKNOWN': 0,
+                               'MEMBER_STATE_SYNCING': 1,
+                               'MEMBER_STATE_NEED_MANUAL_SYNC': 2,
+                               'MEMBER_STATE_IN_SYNC': 3,
+                               'MEMBER_STATE_SYNC_FAILED': 4,
+                               'MEMBER_STATE_SYNC_DISCONNECTED': 5,
+                               'MEMBER_STATE_STANDALONE': 6,
+                               'MEMBER_STATE_AWAITING_INITIAL_SYNC': 7,
+                               'MEMBER_STATE_INCOMPATIBLE_VERSION': 8,
+                               'MEMBER_STATE_PARTIAL_SYNC': 9}
+
+                logging.info("Retrieving device group list...")
+                device_group_list = b.Management.DeviceGroup.get_list()
+                logging.debug("device_group_list =\n%s" % pformat(device_group_list))
+                if device_group_list:
+                    logging.info("Retrieving sync status of device groups...")
+                    device_sync_status = b.Management.DeviceGroup.get_sync_status(device_groups=device_group_list)
+                    logging.debug("device_sync_status =\n%s" % pformat(device_sync_status))
+                    for device_group, sync_status in zip(device_group_list, device_sync_status):
+                        if remote_ts:
+                            logging.info("No remote timestamp available, using local.")
+                        now = timestamp_local()
+                        logging.debug("Local timestamp is %s." % now)
+                        device_group_name = device_group.replace('.', '-')
+                        stat_val = color_lookup[sync_status['color']]
+                        stat_path = "%s.device_group.%s.color" % (prefix, device_group_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+                        stat_val = sync_lookup[sync_status['member_state']]
+                        stat_path = "%s.device_group.%s.member_state" % (prefix, device_group_name)
+                        metric = (stat_path, (now, stat_val))
+                        logging.debug("metric = %s" % str(metric))
+                        metric_list.append(metric)
+            else:
+                logging.debug("Skipping device groups...")
+
+        except (bigsuds.ServerError, bigsuds.ConnectionError,
+                httplib.BadStatusLine), detail:
+            last_detail = detail
+            logging.error("A connection error was encountered.")
+            logging.error(detail)
+            logging.debug(traceback.format_exc())
+            if upload_attempts < max_attempts:  # don't sleep on last run
+                logging.info("Sleeping %d seconds before retry..." % interval)
+                time.sleep(interval)
+        else:
+            upload_success = True
+    if not upload_success:
+        logging.critical("Unable to collect metrics after %d attempts." %
+                         upload_attempts)
+        logging.critical("Last error: %s" % last_detail)
+        sys.exit(1)
     logging.info("%d metrics gathered." % len(metric_list))
     return(metric_list)
 
@@ -757,15 +1006,26 @@ def main():
     logging.debug("start_timestamp = %s" % start_timestamp)
 
     metric_list = gather_f5_metrics(args.f5_host, args.f5_username,
-                                    args.f5_password, prefix, remote_ts,
-                                    args.interfaces, args.no_ip, 
-                                    args.no_ipv6, args.no_icmp,
+                                    args.f5_password, args.f5_retries,
+                                    args.f5_interval, prefix, remote_ts,
+                                    args.no_ip, args.no_ipv6, args.no_icmp,
                                     args.no_icmpv6, args.no_tcp, args.no_tmm,
                                     args.no_client_ssl, args.no_interface,
                                     args.no_trunk, args.no_cpu, args.no_host,
                                     args.no_snat_pool,
                                     args.no_snat_translation,
-                                    args.no_virtual_server, args.no_pool)
+                                    args.no_virtual_server, args.no_pool,
+                                    args.no_pool_member, args.no_irule,
+                                    args.no_http, args.no_oneconnect,
+                                    args.no_temperature, args.no_fan,
+                                    args.no_device_group, args.no_node)
+
+    # filter metric list
+
+    if args.exclude:
+        for pattern in args.exclude:
+            metric_list = [m for m in metric_list if not fnmatchcase(m[0], pattern)]
+        logging.debug("metric_list =\n%s" % pformat(metric_list))
 
     if not args.skip_upload and args.carbon_host:
         upload_attempts = 0
@@ -783,7 +1043,7 @@ def main():
                 logging.debug(Exception)
                 logging.debug(detail)
                 upload_success = False
-                if upload_attempts < max_attempts:  # don't sleep on last run
+                if upload_attempts < max_attempts:  # don't sleep after last run
                     logging.info("Sleeping %d seconds before retry..." %
                                  args.carbon_interval)
                     time.sleep(args.carbon_interval)
