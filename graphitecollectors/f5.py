@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 import traceback
-from carbonita import timestamp_local, send_metrics
+from carbonita import Carbon, timestamp_local
 from datetime import tzinfo, timedelta, datetime
 from fnmatch import fnmatchcase
 from pprint import pformat
@@ -57,8 +57,12 @@ def get_parser():
     carbon_group.add_argument('--carbon-host', help="Carbon host",
                               dest="carbon_host")
     carbon_group.add_argument('-p', '--carbon-port', '--port',
-                              help="Carbon port [%(default)d]", type=int,
-                              dest='carbon_port', default=2004)
+                              help="Carbon port", type=int,
+                              dest='carbon_port')
+    carbon_group.add_argument('-e', '--carbon-encoding', '--encoding',
+                              help="Carbon encoding [%(default)s]",
+                              default='plaintext', dest='carbon_encoding',
+                              choices=['plaintext', 'pickle'])
     carbon_group.add_argument('-r', '--carbon-retries',
                               help="Number of carbon server delivery " +
                                    "attempts [%(default)d]", type=int,
@@ -1035,20 +1039,23 @@ def main():
             upload_attempts += 1
             logging.info("Uploading metrics (try #%d/%d)..." %
                          (upload_attempts, max_attempts))
-            try:
-                send_metrics(args.carbon_host, args.carbon_port, metric_list,
-                             args.chunk_size)
-            except Exception, detail:
-                logging.error("Unable to upload metrics.")
-                logging.debug(Exception)
-                logging.debug(detail)
-                upload_success = False
-                if upload_attempts < max_attempts:  # don't sleep after last run
-                    logging.info("Sleeping %d seconds before retry..." %
-                                 args.carbon_interval)
-                    time.sleep(args.carbon_interval)
-            else:
-                upload_success = True
+            with Carbon(args.carbon_host, args.carbon_port,
+                        args.carbon_encoding) as carbon:
+                try:
+                    carbon.connect()
+                    carbon.send(metric_list, args.chunk_size)
+                    carbon.close()
+                except Exception, detail:
+                    logging.error("Unable to upload metrics.")
+                    logging.debug(Exception)
+                    logging.debug(detail)
+                    upload_success = False
+                    if upload_attempts < max_attempts:  # don't sleep after last run
+                        logging.info("Sleeping %d seconds before retry..." %
+                                     args.carbon_interval)
+                        time.sleep(args.carbon_interval)
+                else:
+                    upload_success = True
         if not upload_success:
             logging.error("Unable to upload metrics after %d attempts." %
                           upload_attempts)
