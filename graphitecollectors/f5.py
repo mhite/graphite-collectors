@@ -89,7 +89,7 @@ def get_parser():
     metric_group.add_argument('--exclude', action="append", dest="exclude",
                               metavar="PATTERN")
     metric_group.add_argument('--no-ip', action="store_true", dest="no_ip")
-    metric_group.add_argument('--no-ipv6', action="store_true",dest="no_ipv6")
+    metric_group.add_argument('--no-ipv6', action="store_true", dest="no_ipv6")
     metric_group.add_argument('--no-icmp', action="store_true", dest="no_icmp")
     metric_group.add_argument('--no-icmpv6', action="store_true",
                               dest="no_icmpv6")
@@ -133,7 +133,7 @@ class TZFixedOffset(tzinfo):
     """Fixed offset in minutes east from UTC."""
 
     def __init__(self, offset, name):
-        self.__offset = timedelta(minutes = offset)
+        self.__offset = timedelta(minutes=offset)
         self.__name = name
 
     def utcoffset(self, dt):
@@ -180,6 +180,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
     """ Connects to an F5 via iControl and pulls statistics.
     """
     last_detail = None
+    now = None
+    remote_tz = TZFixedOffset(0, "UTC")
     upload_attempts = 0
     upload_success = False
     max_attempts = retries + 1
@@ -192,11 +194,6 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
             b = bigsuds.BIGIP(hostname=ltm_host, username=user, password=password)
             logging.info("Requesting session...")
             b = b.with_session_id()
-            logging.info("Retrieving time zone information...")
-            time_zone = b.System.SystemInfo.get_time_zone()
-            logging.debug("time_zone = %s" % pformat(time_zone))
-            tz = TZFixedOffset(offset=(time_zone['gmt_offset'] * 60), name=time_zone['time_zone'])
-            logging.info("Remote time zone is \"%s\"." % time_zone['time_zone'])
             logging.info("Setting recursive query state to enabled...")
             b.System.Session.set_recursive_query_state(state='STATE_ENABLED')
             logging.info("Switching active folder to root...")
@@ -213,7 +210,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -241,7 +239,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -269,7 +268,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -297,7 +297,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -325,7 +326,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -353,7 +355,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -381,7 +384,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -413,7 +417,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                     if remote_ts:
                         logging.info("Calculating epoch time from remote timestamp...")
                         now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                               ts['hour'], ts['minute'], ts['second'], tz)
+                                               ts['hour'], ts['minute'],
+                                               ts['second'], remote_tz)
                         logging.debug("Remote timestamp is %s." % now)
                     else:
                         now = timestamp_local()
@@ -447,7 +452,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                     if remote_ts:
                         logging.info("Calculating epoch time from remote timestamp...")
                         now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                               ts['hour'], ts['minute'], ts['second'], tz)
+                                               ts['hour'], ts['minute'],
+                                               ts['second'], remote_tz)
                         logging.debug("Remote timestamp is %s." % now)
                     else:
                         now = timestamp_local()
@@ -477,7 +483,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -508,7 +515,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -543,7 +551,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -573,7 +582,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -603,7 +613,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -633,7 +644,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -690,7 +702,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                         if remote_ts:
                             logging.info("Calculating epoch time from remote timestamp...")
                             now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                                   ts['hour'], ts['minute'], ts['second'], tz)
+                                                   ts['hour'], ts['minute'],
+                                                   ts['second'], remote_tz)
                             logging.debug("Remote timestamp is %s." % now)
                         else:
                             now = timestamp_local()
@@ -720,7 +733,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -750,7 +764,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -780,7 +795,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -810,7 +826,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -840,7 +857,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -871,7 +889,8 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                 if remote_ts:
                     logging.info("Calculating epoch time from remote timestamp...")
                     now = convert_to_epoch(ts['year'], ts['month'], ts['day'],
-                                           ts['hour'], ts['minute'], ts['second'], tz)
+                                           ts['hour'], ts['minute'],
+                                           ts['second'], remote_tz)
                     logging.debug("Remote timestamp is %s." % now)
                 else:
                     now = timestamp_local()
@@ -929,10 +948,20 @@ def gather_f5_metrics(ltm_host, user, password, retries, interval, prefix,
                     device_sync_status = b.Management.DeviceGroup.get_sync_status(device_groups=device_group_list)
                     logging.debug("device_sync_status =\n%s" % pformat(device_sync_status))
                     for device_group, sync_status in zip(device_group_list, device_sync_status):
-                        if remote_ts:
-                            logging.info("No remote timestamp available, using local.")
-                        now = timestamp_local()
-                        logging.debug("Local timestamp is %s." % now)
+                        if remote_ts and not now:
+                            # remote timestamp not available on this metric and
+                            # no previous remote timestamp available -- best we
+                            # can do is use local timestamp.
+                            now = timestamp_local()
+                            logging.debug("No remote timestamp for metric nor previous remote timestamp available, using local.")
+                            logging.debug("Local timestamp is %s." % now)
+                        elif not remote_ts:
+                            now = timestamp_local()
+                            logging.debug("Local timestamp is %s." % now)
+                        else:
+                            # use previous remote timestamp
+                            logging.debug("No remote timestamp for metric, using previous remote timestamp.")
+                            logging.debug("Remote timestamp is %s." % now)
                         device_group_name = device_group.replace('.', '-')
                         stat_val = color_lookup[sync_status['color']]
                         stat_path = "%s.device_group.%s.color" % (prefix, device_group_name)
