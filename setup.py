@@ -6,7 +6,7 @@ setup(
     author='Matt Hite',
     author_email='mhite@hotmail.com',
     description='A collection of network device graphite collectors',
-    version='1.5.1',
+    version='1.5.2',
     packages=['graphitecollectors',],
     scripts=['bin/f5-agent',],
     install_requires=['bigsuds', 'argparse',],

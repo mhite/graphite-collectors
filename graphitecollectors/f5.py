@@ -16,7 +16,7 @@ from datetime import tzinfo, timedelta, datetime
 from fnmatch import fnmatchcase
 from pprint import pformat
 
-__VERSION__ = "1.82"
+__VERSION__ = "1.83"
 
 
 def get_parser():
@@ -909,6 +909,25 @@ def main():
                                     args.no_http, args.no_oneconnect,
                                     args.no_temperature, args.no_fan,
                                     args.no_device_group, args.no_node)
+
+    collection_finish_timestamp = timestamp_local()
+    logging.debug("collection_finish_timestamp = %s" % collection_finish_timestamp)
+    collection_time = collection_finish_timestamp - start_timestamp
+    logging.debug("collection_time = %s" % collection_time)
+
+    # create a metric representing how long F5 statistics collection took
+    # don't bother to generate a collection_time metric if nothing collected
+
+    if metric_list:
+        if remote_ts:
+            # grab first metric and borrow its metric timestamp
+            now = metric_list[0][1][0]
+        else:
+            now = start_timestamp
+        stat_path = "%s.agent.collection_time" % prefix
+        metric = (stat_path, (now, collection_time))
+        logging.debug("metric = %s" % str(metric))
+        metric_list.append(metric)
 
     # filter metric list
 
