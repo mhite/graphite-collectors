@@ -5,13 +5,11 @@
 
 # Author: Matt Hite
 # Email: mhite@hotmail.com
-# 9/25/2013
 
 import logging
 import pickle
 import socket
 import struct
-import time
 
 
 class Carbon(object):
@@ -143,16 +141,3 @@ class Carbon(object):
         if self._socket:
             self._socket.close()
             self._socket = None
-
-
-def timestamp_local():
-    """Return local epoch timestamp.
-
-    Generate an integer epoch timestamp value of the current time.
-
-    Returns:
-        Integer of epoch timestamp.
-    """
-    epoch = int(time.time())
-    logging.debug("epoch = %s" % epoch)
-    return(epoch)
