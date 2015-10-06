@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime
 from pprint import pformat
 from time import sleep
-from util import timestamp_local, TZFixedOffset
+from .util import timestamp_local, TZFixedOffset
 
 TZ_UTC = TZFixedOffset(0, 'UTC')
 
@@ -607,13 +607,16 @@ def get_bigip_api(hostname, user, password, max_attempts=1, retry_sleep=1):
     return api
 
 
-def get_bigip_metrics(api, categories, prefix):
+def get_bigip_metrics(api, categories, prefix, local_ts=False):
     metrics = []
     start_ts = timestamp_local()
     logging.debug('start_ts = %s' % start_ts)
     for category in categories:
         try:
-            temp = globals()['get_' + category + '_metrics'](api, prefix)
+            if local_ts:
+                temp = globals()['get_' + category + '_metrics'](api, prefix, timestamp_local())
+            else:
+                temp = globals()['get_' + category + '_metrics'](api, prefix)
         except (bigsuds.ServerError, bigsuds.ConnectionError,
                 bigsuds.ParseError, httplib.BadStatusLine), detail:
             logging.error('An exception was encountered: %s' % detail)

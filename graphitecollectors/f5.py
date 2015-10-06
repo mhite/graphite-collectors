@@ -15,7 +15,7 @@ from pprint import pformat
 from time import sleep
 from .util import timestamp_local, write_json_metrics
 
-__VERSION__ = '1.9'
+__VERSION__ = '1.9.1'
 
 
 def get_parser():
@@ -47,7 +47,7 @@ def get_parser():
     icontrol_group.add_argument('--f5-host', help='F5 host', dest='f5_host',
                                 required=True)
     icontrol_group.add_argument('--f5-retries', help='Number of F5 iControl ' +
-                                'connection attempts [%(default)d]',
+                                'connection retry attempts [%(default)d]',
                                 type=int, dest='f5_retries', default=2)
     icontrol_group.add_argument('--f5-interval', help='Interval between F5 ' +
                                 'iControl connection retry attempts ' +
@@ -80,7 +80,7 @@ def get_parser():
     carbon_group.add_argument('-t', '--timestamp',
                               help='Timestamp authority (local | remote) ' +
                                    '[%(default)s]', dest='ts_auth',
-                              choices=['local', 'remote'], default='local')
+                              choices=['local', 'remote'], default='remote')
     carbon_group.add_argument('-s', '--skip-upload', '-d', '--dry-run',
                               help='Skip metric upload step [%(default)s]',
                               action='store_true', dest='skip_upload',
@@ -145,10 +145,10 @@ def main():
     logging.getLogger('suds').setLevel(logging.CRITICAL)
     logging.debug('args = %s' % args)
 
-    if args.ts_auth.strip().lower() == 'remote':
-        remote_ts = True
+    if args.ts_auth.strip().lower() == 'local':
+        local_ts = True
     else:
-        remote_ts = False
+        local_ts = False
 
     if args.prefix:
         prefix = args.prefix.strip()
@@ -181,7 +181,7 @@ def main():
 
     # gather metrics
 
-    metric_list = get_bigip_metrics(api, categories, prefix)
+    metric_list = get_bigip_metrics(api, categories, prefix, local_ts)
 
     # filter metric list
 
