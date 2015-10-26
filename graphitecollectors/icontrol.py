@@ -574,6 +574,27 @@ def get_device_group_metrics(api, prefix='', ts=None):
     return metrics
 
 
+def get_web_acceleration_metrics(api, prefix='', ts=None):
+    metrics = []
+    logging.info('Retrieving web acceleration statistics...')
+    web_accel_stats = api.LocalLB.ProfileWebAcceleration.get_all_statistics()
+    logging.debug('web_accel_stats =\n%s' % pformat(web_accel_stats))
+    if not ts:
+        ts = ts_epoch(web_accel_stats['time_stamp'])
+    statistics = web_accel_stats['statistics']
+
+    for x in statistics:
+        profile_name = x['profile_name'].replace('.', '-')
+        for y in x['statistics']:
+            stat_name, stat_val = parse_statistic(statistic=y)
+            stat_path = '%s.web_acceleration.%s.%s' % (prefix, profile_name,
+                                                       stat_name)
+            metric = (stat_path, (ts, stat_val))
+            logging.debug('metric = %s' % str(metric))
+            metrics.append(metric)
+    return metrics
+
+
 def get_bigip_api(hostname, user, password, max_attempts=1, retry_sleep=1):
     last_error = ''
     for attempt in range(max_attempts):
