@@ -651,9 +651,14 @@ def get_bigip_metrics(api, categories, prefix, local_ts=False):
     logging.debug('finish_ts = %s' % finish_ts)
     collection_time = finish_ts - start_ts
     logging.info('Metrics gathered in %d seconds.' % collection_time)
+    # add agent-related metrics if non-empty metrics list
     if metrics:
         stat_path = '%s.agent.collection_time' % prefix
         metric = (stat_path, (finish_ts, collection_time))
+        logging.debug('metric = %s' % str(metric))
+        metrics.append(metric)
+        stat_path = '%s.agent.metric_count' % prefix
+        metric = (stat_path, (finish_ts, len(metrics) + 1))  # include self
         logging.debug('metric = %s' % str(metric))
         metrics.append(metric)
     return metrics

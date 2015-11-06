@@ -15,7 +15,7 @@ from pprint import pformat
 from time import sleep
 from .util import timestamp_local, write_json_metrics
 
-__VERSION__ = '1.9.2'
+__VERSION__ = '1.9.3'
 
 
 def get_parser():
