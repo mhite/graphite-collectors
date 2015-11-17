@@ -595,6 +595,27 @@ def get_web_acceleration_metrics(api, prefix='', ts=None):
     return metrics
 
 
+def get_tcp_profile_metrics(api, prefix='', ts=None):
+    metrics = []
+    logging.info('Retrieving TCP profile statistics...')
+    tcp_profile_stats = api.LocalLB.ProfileTCP.get_all_statistics()
+    logging.debug('tcp_profile_stats =\n%s' % pformat(tcp_profile_stats))
+    if not ts:
+        ts = ts_epoch(tcp_profile_stats['time_stamp'])
+    statistics = tcp_profile_stats['statistics']
+
+    for x in statistics:
+        profile_name = x['profile_name'].replace('.', '-')
+        for y in x['statistics']:
+            stat_name, stat_val = parse_statistic(statistic=y)
+            stat_path = '%s.tcp_profile.%s.%s' % (prefix, profile_name,
+                                                          stat_name)
+            metric = (stat_path, (ts, stat_val))
+            logging.debug('metric = %s' % str(metric))
+            metrics.append(metric)
+    return metrics
+
+
 def get_bigip_api(hostname, user, password, max_attempts=1, retry_sleep=1):
     last_error = ''
     for attempt in range(max_attempts):

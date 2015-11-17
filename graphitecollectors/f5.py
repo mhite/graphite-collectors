@@ -15,7 +15,7 @@ from pprint import pformat
 from time import sleep
 from .util import timestamp_local, write_json_metrics
 
-__VERSION__ = '1.9.3'
+__VERSION__ = '1.9.4'
 
 
 def get_parser():
@@ -128,6 +128,8 @@ def get_parser():
     metric_group.add_argument('--no-node', action='store_true', dest='no_node')
     metric_group.add_argument('--no-web-acceleration', action='store_true',
                               dest='no_web_acceleration')
+    metric_group.add_argument('--no-tcp-profile', action='store_true',
+                              dest='no_tcp_profile')
     return parser
 
 
