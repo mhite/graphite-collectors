@@ -31,7 +31,7 @@ This will install the required libraries into your Python installation along wit
 
 ## Usage
 
-Information about the collector tool can be viewed with the ```-h``` option. 
+Information about the collector tool can be viewed with the ```-h``` option.
 
 ```
 $ f5-agent --help
@@ -134,7 +134,7 @@ On the server that will perform metric collection, install the following cron:
 
 This cron entry will perform metric collection against an F5 device every 5 minutes. You will need a separate configuration file and cron entry for each F5 device.
 
-Create a configuration file similar to the following and place in /usr/local/etc/collector.cnf.
+Create a configuration file in `/usr/local/etc/collector.cnf` similar to the following:
 
 ```
 --f5-username
@@ -192,7 +192,7 @@ remote
 *.vs.*.maximum_connection_duration
 ```
 
-The --no and --exclude arguments are portions of the metric tree that will be ignored and not send to the Graphite server.
+The `--no` and `--exclude` arguments are portions of the metric tree that will be ignored and not send to the Graphite server.
 
 ## Author
 
