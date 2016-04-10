@@ -196,7 +196,7 @@ The `--no` and `--exclude` arguments are portions of the metric tree that will b
 
 ## Author
 
-[Matt Hite](mailto:mhite@hotmail.com) created graphite-collectors.
+[Matt Hite](mailto:mhite@hotmail.com) created graphite-collectors. Feel free to reach out to me with any F5 consulting and/or custom integration needs your organization may have.
 
 ## Contribute
 
